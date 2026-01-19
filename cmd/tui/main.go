@@ -9,10 +9,22 @@ import (
 )
 
 func main() {
-	processes.SortMode = os.Args[1]
+
+	switch len(os.Args) {
+	case 1:
+		processes.SortMode = "-m"
+	default:
+		processes.SortMode = os.Args[1]
+	}
+
 	logger.Logger.Println("SortMode:", processes.SortMode)
 
-	err := tui.Run()
+	_, err := os.Create(".env")
+	if err != nil {
+		logger.Logger.Println(err)
+	}
+
+	err = tui.Run()
 	if err != nil {
 		logger.Logger.Println("Error running program:", err)
 	}

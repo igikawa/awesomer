@@ -1,5 +1,12 @@
 package tui
 
+import (
+	"github.com/charmbracelet/lipgloss"
+)
+
 func (m model) View() string {
-	return baseStyle.Render(m.table.View()) + "\n"
+	return lipgloss.NewStyle().
+		Width(m.width).
+		Height(m.height).
+		Render(m.table.View())
 }

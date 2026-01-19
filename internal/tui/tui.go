@@ -4,6 +4,7 @@ import (
 	"awesomeProject/internal/config"
 	"awesomeProject/internal/processes"
 	"awesomeProject/pkg/logger"
+
 	"os"
 	"time"
 
@@ -12,15 +13,17 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var baseStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("240"))
-
 type tickMsg time.Time
 
+type dataMsg struct {
+	rows []table.Row
+}
+
 type model struct {
-	table table.Model
-	Tick  int
+	table  table.Model
+	Tick   int
+	width  int
+	height int
 }
 
 func (m model) tick() tea.Cmd {
@@ -48,7 +51,7 @@ func newTable() table.Model {
 		table.WithColumns(columns),
 		table.WithRows(rows),
 		table.WithFocused(true),
-		table.WithHeight(7),
+		table.WithHeight(20),
 	)
 
 	s := table.DefaultStyles()
@@ -73,6 +76,8 @@ func Run() error {
 	m := model{
 		t,
 		config.NewConfig().Tick,
+		70,
+		20,
 	}
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		defer os.Exit(1)

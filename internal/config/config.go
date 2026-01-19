@@ -1,16 +1,20 @@
 package config
 
-import "github.com/ilyakaznacheev/cleanenv"
+import (
+	"awesomeProject/pkg/logger"
+
+	"github.com/ilyakaznacheev/cleanenv"
+)
 
 type Config struct {
-	Tick int `env:"TICK" envDefault:"5"`
+	Tick int `env:"TICK" env-default:"1"`
 }
 
 func NewConfig() *Config {
 	var cfg Config
 	err := cleanenv.ReadConfig(".env", &cfg)
 	if err != nil {
-		panic(err)
+		logger.Logger.Println("Error reading config:", err)
 	}
 	return &cfg
 }
