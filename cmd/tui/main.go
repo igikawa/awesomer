@@ -19,9 +19,12 @@ func main() {
 
 	logger.Logger.Println("SortMode:", processes.SortMode)
 
-	_, err := os.Create(".env")
+	_, err := os.Open(".env")
 	if err != nil {
-		logger.Logger.Println(err)
+		_, err = os.Create(".env")
+		if err != nil {
+			logger.Logger.Println(err)
+		}
 	}
 
 	err = tui.Run()
