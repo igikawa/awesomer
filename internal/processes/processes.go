@@ -11,23 +11,21 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 )
 
-func GetProcesses() ([]table.Row, error) {
+var SortMode string
+
+func GetProcesses(sortMod string) ([]table.Row, error) {
 	proc, err := process.Processes()
 	if err != nil {
 		return nil, fmt.Errorf("pkg process, GetProcesses: %w", err)
 	}
-	slices.SortFunc(proc, func(a, b *process.Process) int {
-		aPercent, _ := a.CPUPercent()
-		bPercent, _ := b.CPUPercent()
 
-		if aPercent > bPercent {
-			return -1
-		} else if aPercent < bPercent {
-			return 1
-		}
+	switch sortMod {
+	case "-c":
+		sortByCPU(proc)
+	case "-m":
+		sortByMem(proc)
+	}
 
-		return 0
-	})
 	var info []table.Row
 	for _, p := range proc {
 		name, err := p.Name()
@@ -56,6 +54,36 @@ func GetProcesses() ([]table.Row, error) {
 		})
 	}
 	return info, nil
+}
+
+func sortByCPU(proc []*process.Process) {
+	slices.SortFunc(proc, func(a, b *process.Process) int {
+		aPercent, _ := a.CPUPercent()
+		bPercent, _ := b.CPUPercent()
+
+		if aPercent > bPercent {
+			return -1
+		} else if aPercent < bPercent {
+			return 1
+		}
+
+		return 0
+	})
+}
+
+func sortByMem(proc []*process.Process) {
+	slices.SortFunc(proc, func(a, b *process.Process) int {
+		aPercent, _ := a.MemoryPercent()
+		bPercent, _ := b.MemoryPercent()
+
+		if aPercent > bPercent {
+			return -1
+		} else if aPercent < bPercent {
+			return 1
+		}
+
+		return 0
+	})
 }
 
 func StopProcess(pid int) error {
