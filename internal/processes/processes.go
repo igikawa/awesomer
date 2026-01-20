@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"sort"
 	"syscall"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -20,10 +21,14 @@ func GetProcesses(sortMod string) ([]table.Row, error) {
 	}
 
 	switch sortMod {
+	case "-n":
+		sortByName(proc)
 	case "-c":
 		sortByCPU(proc)
 	case "-m":
 		sortByMem(proc)
+	case "-t":
+		sortByThreads(proc)
 	}
 
 	var info []table.Row
@@ -48,7 +53,7 @@ func GetProcesses(sortMod string) ([]table.Row, error) {
 		info = append(info, table.Row{
 			fmt.Sprintf("%d", p.Pid),
 			fmt.Sprintf("%s", name),
-			fmt.Sprintf("%d %%", int(cpu)/runtime.NumCPU()),
+			fmt.Sprintf("%.2f %%", cpu/float64(runtime.NumCPU())),
 			fmt.Sprintf("%.2f %%", mem),
 			fmt.Sprintf("%d", threads),
 		})
@@ -60,13 +65,11 @@ func sortByCPU(proc []*process.Process) {
 	slices.SortFunc(proc, func(a, b *process.Process) int {
 		aPercent, _ := a.CPUPercent()
 		bPercent, _ := b.CPUPercent()
-
 		if aPercent > bPercent {
 			return -1
 		} else if aPercent < bPercent {
 			return 1
 		}
-
 		return 0
 	})
 }
@@ -75,14 +78,33 @@ func sortByMem(proc []*process.Process) {
 	slices.SortFunc(proc, func(a, b *process.Process) int {
 		aPercent, _ := a.MemoryPercent()
 		bPercent, _ := b.MemoryPercent()
-
 		if aPercent > bPercent {
 			return -1
 		} else if aPercent < bPercent {
 			return 1
 		}
-
 		return 0
+	})
+}
+
+func sortByThreads(proc []*process.Process) {
+	slices.SortFunc(proc, func(a, b *process.Process) int {
+		aThreads, _ := a.NumThreads()
+		bThreads, _ := b.NumThreads()
+		if aThreads > bThreads {
+			return -1
+		} else if aThreads < bThreads {
+			return 1
+		}
+		return 0
+	})
+}
+
+func sortByName(proc []*process.Process) {
+	sort.Slice(proc, func(i, j int) bool {
+		iName, _ := proc[i].Name()
+		jName, _ := proc[j].Name()
+		return iName < jName
 	})
 }
 

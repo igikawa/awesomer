@@ -58,6 +58,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				tea.Printf("Let's go to %s!", m.table.SelectedRow()[1]),
 			)
+		// processes manipulation
 		case "d":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
@@ -67,7 +68,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				logger.Logger.Println(err)
 			}
-
 		case "s":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
@@ -86,6 +86,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				logger.Logger.Println(err)
 			}
+		// sort mode manipulation
+		case "n":
+			processes.SortMode = "-n"
+		case "c":
+			processes.SortMode = "-c"
+		case "m":
+			processes.SortMode = "-m"
+		case "t":
+			processes.SortMode = "-t"
+		case "p":
+			processes.SortMode = "empty"
 		}
 	}
 

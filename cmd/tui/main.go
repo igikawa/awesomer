@@ -9,14 +9,6 @@ import (
 )
 
 func main() {
-
-	switch len(os.Args) {
-	case 1:
-		processes.SortMode = "-m"
-	default:
-		processes.SortMode = os.Args[1]
-	}
-
 	logger.Logger.Println("SortMode:", processes.SortMode)
 
 	_, err := os.Open(".env")
