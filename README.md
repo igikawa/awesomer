@@ -14,7 +14,8 @@
 
 #### Установка
 ```shell
-git clone https://github.com/igikawa/awesomer.git & cd awesomer
+git clone https://github.com/igikawa/awesomer.git
+cd awesomer
 go mod tidy
 go build -o awesomer cmd/tui/main.go
 chmod +x ./awesomer
