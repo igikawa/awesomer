@@ -1,12 +1,17 @@
 package tui
 
-import (
-	"github.com/charmbracelet/lipgloss"
-)
+import "github.com/charmbracelet/lipgloss"
 
 func (m model) View() string {
-	return lipgloss.NewStyle().
-		Width(m.width).
-		Height(m.height).
+	tableView := tableStyle.
+		Width(m.width - 55 - 2 - 4).
 		Render(m.table.View())
+	infoView := baseStyle.Render(m.info)
+
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		tableView,
+		"  ",
+		infoView,
+	)
 }

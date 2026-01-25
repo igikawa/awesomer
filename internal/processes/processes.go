@@ -61,6 +61,12 @@ func GetProcesses(sortMod string) ([]table.Row, error) {
 	return info, nil
 }
 
+func GetProcessInfo(pid int) (process.Process, error) {
+	return process.Process{
+		Pid: int32(pid),
+	}, nil
+}
+
 func sortByCPU(proc []*process.Process) {
 	slices.SortFunc(proc, func(a, b *process.Process) int {
 		aPercent, _ := a.CPUPercent()

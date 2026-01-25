@@ -13,6 +13,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const INFO = "Info\n\n" +
+	"↑↓ - select process\n" +
+	"Enter - show process info\n" +
+	"S - stop process\n\n" +
+	"R - resume process\n\n" +
+	"D - kill process\n\n" +
+	"Q - exit\n\n"
+
 type tickMsg time.Time
 
 type dataMsg struct {
@@ -21,10 +29,22 @@ type dataMsg struct {
 
 type model struct {
 	table  table.Model
+	info   string
 	Tick   int
 	width  int
 	height int
 }
+
+var baseStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("62")).
+	Padding(1, 2).
+	Width(55)
+
+var tableStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("62")).
+	Padding(0, 1)
 
 func (m model) tick() tea.Cmd {
 	s := time.Duration(m.Tick) * time.Second
@@ -74,10 +94,11 @@ func Run() error {
 	t := newTable()
 
 	m := model{
-		t,
-		config.NewConfig().Tick,
-		70,
-		20,
+		table:  t,
+		info:   INFO,
+		Tick:   config.NewConfig().Tick,
+		width:  80,
+		height: 20,
 	}
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		defer os.Exit(1)
