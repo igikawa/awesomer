@@ -3,8 +3,8 @@ package tui
 import (
 	"awesomeProject/internal/processes"
 	"awesomeProject/pkg/logger"
-	"fmt"
 
+	"fmt"
 	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -55,37 +55,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
 				logger.Logger.Println(err)
+				return m, nil
 			}
 
-			p, _ := processes.GetProcessInfo(pid)
-			name, _ := p.Name()
-			cmd, _ := p.Cmdline()
+			p, err := processes.ParserObj.GetProcessInfo(int32(pid))
+			if err != nil {
+				logger.Logger.Println(err)
+				m.info = fmt.Sprintf("Error parsing process info: %s", err)
+				return m, nil
+			}
 
 			m.info = fmt.Sprintf("Selected process:\n\n"+
 				"PID: %d\n\n"+
 				"Name: %s\n\n"+
-				"CMD: %s\n\n", p.Pid, name, cmd)
+				"CMD: %s\n\n",
+				p.PID, p.Name, p.Cmd)
 
-			files, _ := p.OpenFiles()
-			switch len(files) {
+			switch len(p.OpenFiles) {
 			case 0:
 				m.info += "Opened files: nothing\n\n"
 			default:
 				m.info += "Opened files:\n"
-				for _, file := range files {
-					m.info += fmt.Sprintf("\t%s\n", file.Path)
+				for _, file := range p.OpenFiles {
+					m.info += fmt.Sprintf("\t%s\n", file)
 				}
 			}
 
-			children, _ := p.Children()
-			switch len(children) {
+			switch len(p.Children) {
 			case 0:
 				m.info += "\nChild processes: nothing\n"
 			default:
 				m.info += "Child processes:\n"
-				for _, child := range children {
-					name, _ := child.Name()
-					m.info += fmt.Sprintf("\tPID: %d, Name: %s\n", child.Pid, name)
+				for _, child := range p.Children {
+					m.info += fmt.Sprintf("\tPID: %d, Name: %s\n", child.PID, child.Name)
 				}
 			}
 
