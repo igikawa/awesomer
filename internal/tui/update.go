@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const HEIGHT_SPACE = 4
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
@@ -18,9 +20,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		tableWidth := msg.Width - baseStyle.GetWidth() - 4
+		tableWidth := msg.Width - baseStyle.GetWidth() - HEIGHT_SPACE
 		m.table.SetWidth(tableWidth)
-		m.table.SetHeight(msg.Height - 4)
+		m.table.SetHeight(msg.Height - HEIGHT_SPACE)
 
 	case tickMsg:
 		if m.Tick == 0 {
@@ -85,16 +87,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case 0:
 				m.info += "\nChild processes: nothing\n"
 			default:
-				m.info += "Child processes:\n"
-				for _, child := range p.Children {
-					m.info += fmt.Sprintf("\tPID: %d, Name: %s\n", child.PID, child.Name)
+				m.info += "\nChild processes:\n"
+				_, tree, err := processes.ParserObj.GetProcessTree(int32(pid))
+				if err != nil {
+					logger.Logger.Println(err)
 				}
+				s, err := processes.GetTuiTree(int32(pid), tree)
+				m.info += fmt.Sprintf("\n%s\n", s)
 			}
 
 			return m, nil
 
 		// processes manipulation
-		case "d":
+		case "k":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
 				logger.Logger.Println(err)
@@ -104,6 +109,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				logger.Logger.Println(err)
 			}
 			m.info = fmt.Sprintf("Killed process:\n\nPID: %d\n\n", pid)
+			return m, nil
+		case "d":
+			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
+			if err != nil {
+				logger.Logger.Println(err)
+			}
+			err = processes.KillProcessTree(pid)
+			if err != nil {
+				logger.Logger.Println(err)
+			}
+			m.info = fmt.Sprintf("Killed tree of process:\n\nPID: %d\n\n", pid)
 			return m, nil
 		case "s":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])

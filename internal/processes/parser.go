@@ -22,6 +22,7 @@ var (
 type ParserAbstractionLayer interface {
 	GetAllProcessess() ([]ProcessInfo, error)
 	GetProcessInfo(pid int32) (ProcessInfo, error)
+	GetProcessTree(pid int32) ([]int32, map[int32][]int32, error)
 }
 
 type ChildInfo struct {
@@ -30,6 +31,7 @@ type ChildInfo struct {
 }
 
 type ProcessInfo struct {
+	PPID       int32
 	PID        int32
 	Name       string
 	CPUPercent float64
@@ -46,6 +48,31 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
+func (p *Parser) GetProcessTree(pid int32) ([]int32, map[int32][]int32, error) {
+	proc, err := p.GetAllProcessess()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tree := make(map[int32][]int32)
+
+	for _, v := range proc {
+		tree[v.PPID] = append(tree[v.PPID], v.PID)
+	}
+
+	result := p.walkingOnAir(pid, tree, []int32{})
+
+	return result, tree, nil
+}
+
+func (p *Parser) walkingOnAir(pid int32, tree map[int32][]int32, result []int32) []int32 {
+	for _, child := range tree[pid] {
+		result = p.walkingOnAir(child, tree, result)
+	}
+	result = append(result, pid)
+	return result
+}
+
 func (p *Parser) GetAllProcessess() ([]ProcessInfo, error) {
 	proc, err := process.Processes()
 	if err != nil {
@@ -55,6 +82,11 @@ func (p *Parser) GetAllProcessess() ([]ProcessInfo, error) {
 	var info []ProcessInfo
 
 	for _, p := range proc {
+		ppid, err := p.Ppid()
+		if err != nil {
+			logger.Logger.Println(err)
+		}
+
 		name, err := p.Name()
 		if err != nil {
 			logger.Logger.Println(err)
@@ -75,12 +107,30 @@ func (p *Parser) GetAllProcessess() ([]ProcessInfo, error) {
 			logger.Logger.Println(err)
 		}
 
+		children, err := p.Children()
+		if err != nil {
+			logger.Logger.Println(err)
+		}
+		if err != nil {
+			logger.Logger.Println(err)
+		}
+		var formattedChildren []ChildInfo
+		for _, c := range children {
+			name, _ := c.Name()
+			formattedChildren = append(
+				formattedChildren,
+				ChildInfo{PID: c.Pid, Name: name},
+			)
+		}
+
 		info = append(info, ProcessInfo{
+			PPID:       ppid,
 			PID:        p.Pid,
 			Name:       name,
 			CPUPercent: cpu / NumCPU,
 			MemPercent: mem,
 			Threads:    threads,
+			Children:   formattedChildren,
 		})
 	}
 	return info, nil
@@ -88,6 +138,12 @@ func (p *Parser) GetAllProcessess() ([]ProcessInfo, error) {
 
 func (p *Parser) GetProcessInfo(pid int32) (ProcessInfo, error) {
 	proc := process.Process{Pid: pid}
+
+	ppid, err := proc.Ppid()
+	if err != nil {
+		logger.Logger.Println(err)
+	}
+
 	name, err := proc.Name()
 	if err != nil {
 		logger.Logger.Println(err)
@@ -135,6 +191,7 @@ func (p *Parser) GetProcessInfo(pid int32) (ProcessInfo, error) {
 	}
 
 	return ProcessInfo{
+		PPID:       ppid,
 		PID:        pid,
 		Name:       name,
 		CPUPercent: cpu / NumCPU,

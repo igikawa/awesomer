@@ -5,6 +5,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -117,4 +118,61 @@ func KillProcess(pid int) error {
 		return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
 	}
 	return nil
+}
+
+func KillProcessTree(pid int) error {
+	tree, _, err := ParserObj.GetProcessTree(int32(pid))
+	if err != nil {
+		return fmt.Errorf("pkg process, KillProcessTree: %w", err)
+	}
+
+	for i := range tree {
+		kill, err := os.FindProcess(int(tree[i]))
+		if err != nil {
+			return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
+		}
+		err = kill.Signal(syscall.SIGKILL)
+		if err != nil {
+			return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("%d\n", root))
+
+	var walk func(int32, string)
+	walk = func(pid int32, prefix string) {
+		children, ok := tree[pid]
+		if !ok || len(children) == 0 {
+			return
+		}
+		
+		sort.Slice(children, func(i, j int) bool { return children[i] < children[j] })
+
+		for i, child := range children {
+			isLast := i == len(children)-1
+
+			connector := "├── "
+			nextPrefix := "│   "
+			if isLast {
+				connector = "└── "
+				nextPrefix = "    "
+			}
+
+			sb.WriteString(prefix)
+			sb.WriteString(connector)
+			sb.WriteString(fmt.Sprintf("%d\n", child))
+
+			walk(child, prefix+nextPrefix)
+		}
+	}
+
+	walk(root, "")
+
+	return sb.String(), nil
 }
