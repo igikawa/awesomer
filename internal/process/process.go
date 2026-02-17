@@ -1,4 +1,4 @@
-package processes
+package process
 
 import (
 	"fmt"
@@ -8,13 +8,16 @@ import (
 	"strings"
 	"syscall"
 
+	"awesomeProject/pkg/cgroups"
+
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/google/uuid"
 )
 
 var SortMode string
 
 func GetProcesses(sortMod string) ([]table.Row, error) {
-	proc, err := ParserObj.GetAllProcessess()
+	proc, err := ParserObj.AllProcessess()
 	if err != nil {
 		return nil, fmt.Errorf("pkg process, GetProcesses: %w", err)
 	}
@@ -43,8 +46,8 @@ func GetProcesses(sortMod string) ([]table.Row, error) {
 	return info, nil
 }
 
-func sortByCPU(proc []ProcessInfo) {
-	slices.SortFunc(proc, func(a, b ProcessInfo) int {
+func sortByCPU(proc []Info) {
+	slices.SortFunc(proc, func(a, b Info) int {
 		if a.CPUPercent > b.CPUPercent {
 			return -1
 		} else if a.CPUPercent < b.CPUPercent {
@@ -54,8 +57,8 @@ func sortByCPU(proc []ProcessInfo) {
 	})
 }
 
-func sortByMem(proc []ProcessInfo) {
-	slices.SortFunc(proc, func(a, b ProcessInfo) int {
+func sortByMem(proc []Info) {
+	slices.SortFunc(proc, func(a, b Info) int {
 		if a.MemPercent > b.MemPercent {
 			return -1
 		} else if a.MemPercent < b.MemPercent {
@@ -65,8 +68,8 @@ func sortByMem(proc []ProcessInfo) {
 	})
 }
 
-func sortByThreads(proc []ProcessInfo) {
-	slices.SortFunc(proc, func(a, b ProcessInfo) int {
+func sortByThreads(proc []Info) {
+	slices.SortFunc(proc, func(a, b Info) int {
 		if a.Threads > b.Threads {
 			return -1
 		} else if a.Threads < b.Threads {
@@ -76,12 +79,49 @@ func sortByThreads(proc []ProcessInfo) {
 	})
 }
 
-func sortByName(proc []ProcessInfo) {
+func sortByName(proc []Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iName := proc[i].Name
 		jName := proc[j].Name
 		return iName < jName
 	})
+}
+
+func GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("%d\n", root))
+
+	var walk func(int32, string)
+	walk = func(pid int32, prefix string) {
+		children, ok := tree[pid]
+		if !ok || len(children) == 0 {
+			return
+		}
+
+		sort.Slice(children, func(i, j int) bool { return children[i] < children[j] })
+
+		for i, child := range children {
+			isLast := i == len(children)-1
+
+			connector := "├── "
+			nextPrefix := "│   "
+			if isLast {
+				connector = "└── "
+				nextPrefix = "    "
+			}
+
+			sb.WriteString(prefix)
+			sb.WriteString(connector)
+			sb.WriteString(fmt.Sprintf("%d\n", child))
+
+			walk(child, prefix+nextPrefix)
+		}
+	}
+
+	walk(root, "")
+
+	return sb.String(), nil
 }
 
 func StopProcess(pid int) error {
@@ -121,7 +161,7 @@ func KillProcess(pid int) error {
 }
 
 func KillProcessTree(pid int) error {
-	tree, _, err := ParserObj.GetProcessTree(int32(pid))
+	tree, _, err := ParserObj.ProcessTree(int32(pid))
 	if err != nil {
 		return fmt.Errorf("pkg process, KillProcessTree: %w", err)
 	}
@@ -140,39 +180,18 @@ func KillProcessTree(pid int) error {
 	return nil
 }
 
-func GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("%d\n", root))
-
-	var walk func(int32, string)
-	walk = func(pid int32, prefix string) {
-		children, ok := tree[pid]
-		if !ok || len(children) == 0 {
-			return
-		}
-		
-		sort.Slice(children, func(i, j int) bool { return children[i] < children[j] })
-
-		for i, child := range children {
-			isLast := i == len(children)-1
-
-			connector := "├── "
-			nextPrefix := "│   "
-			if isLast {
-				connector = "└── "
-				nextPrefix = "    "
-			}
-
-			sb.WriteString(prefix)
-			sb.WriteString(connector)
-			sb.WriteString(fmt.Sprintf("%d\n", child))
-
-			walk(child, prefix+nextPrefix)
-		}
+func SetProcessThrottling(pid int, limit string) error {
+	_, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("pkg process, SetProcessThrottling: %w", err)
 	}
 
-	walk(root, "")
+	cgroupName := uuid.NewString()
 
-	return sb.String(), nil
+	err = cgroups.SetCPUMax(pid, cgroupName, fmt.Sprintf("%s 100000", limit))
+	if err != nil {
+		return fmt.Errorf("pkg process, SetProcessThrottling: %w", err)
+	}
+
+	return nil
 }

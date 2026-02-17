@@ -1,28 +1,25 @@
-package processes
+package process
 
 import (
 	"awesomeProject/pkg/logger"
 
 	"fmt"
-	"runtime"
 
 	"github.com/shirou/gopsutil/v4/process"
 )
 
 func init() {
 	ParserObj = NewParser()
-	NumCPU = float64(runtime.NumCPU())
 }
 
 var (
 	ParserObj ParserAbstractionLayer
-	NumCPU    float64
 )
 
 type ParserAbstractionLayer interface {
-	GetAllProcessess() ([]ProcessInfo, error)
-	GetProcessInfo(pid int32) (ProcessInfo, error)
-	GetProcessTree(pid int32) ([]int32, map[int32][]int32, error)
+	AllProcessess() ([]Info, error)
+	ProcessInfo(pid int32) (Info, error)
+	ProcessTree(pid int32) ([]int32, map[int32][]int32, error)
 }
 
 type ChildInfo struct {
@@ -30,7 +27,7 @@ type ChildInfo struct {
 	Name string
 }
 
-type ProcessInfo struct {
+type Info struct {
 	PPID       int32
 	PID        int32
 	Name       string
@@ -48,8 +45,8 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-func (p *Parser) GetProcessTree(pid int32) ([]int32, map[int32][]int32, error) {
-	proc, err := p.GetAllProcessess()
+func (p *Parser) ProcessTree(pid int32) ([]int32, map[int32][]int32, error) {
+	proc, err := p.AllProcessess()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -73,70 +70,7 @@ func (p *Parser) walkingOnAir(pid int32, tree map[int32][]int32, result []int32)
 	return result
 }
 
-func (p *Parser) GetAllProcessess() ([]ProcessInfo, error) {
-	proc, err := process.Processes()
-	if err != nil {
-		return nil, fmt.Errorf("pkg process, GetProcesses: %w", err)
-	}
-
-	var info []ProcessInfo
-
-	for _, p := range proc {
-		ppid, err := p.Ppid()
-		if err != nil {
-			logger.Logger.Println(err)
-		}
-
-		name, err := p.Name()
-		if err != nil {
-			logger.Logger.Println(err)
-		}
-
-		cpu, err := p.CPUPercent()
-		if err != nil {
-			logger.Logger.Println(err)
-		}
-
-		mem, err := p.MemoryPercent()
-		if err != nil {
-			logger.Logger.Println(err)
-		}
-
-		threads, err := p.NumThreads()
-		if err != nil {
-			logger.Logger.Println(err)
-		}
-
-		children, err := p.Children()
-		if err != nil {
-			logger.Logger.Println(err)
-		}
-		if err != nil {
-			logger.Logger.Println(err)
-		}
-		var formattedChildren []ChildInfo
-		for _, c := range children {
-			name, _ := c.Name()
-			formattedChildren = append(
-				formattedChildren,
-				ChildInfo{PID: c.Pid, Name: name},
-			)
-		}
-
-		info = append(info, ProcessInfo{
-			PPID:       ppid,
-			PID:        p.Pid,
-			Name:       name,
-			CPUPercent: cpu / NumCPU,
-			MemPercent: mem,
-			Threads:    threads,
-			Children:   formattedChildren,
-		})
-	}
-	return info, nil
-}
-
-func (p *Parser) GetProcessInfo(pid int32) (ProcessInfo, error) {
+func (p *Parser) ProcessInfo(pid int32) (Info, error) {
 	proc := process.Process{Pid: pid}
 
 	ppid, err := proc.Ppid()
@@ -190,15 +124,31 @@ func (p *Parser) GetProcessInfo(pid int32) (ProcessInfo, error) {
 		)
 	}
 
-	return ProcessInfo{
+	return Info{
 		PPID:       ppid,
 		PID:        pid,
 		Name:       name,
-		CPUPercent: cpu / NumCPU,
+		CPUPercent: cpu,
 		MemPercent: mem,
 		Threads:    threads,
 		Cmd:        cmd,
 		OpenFiles:  formatedOpenFiles,
 		Children:   formattedChildren,
 	}, nil
+}
+
+func (p *Parser) AllProcessess() ([]Info, error) {
+	proc, err := process.Processes()
+	if err != nil {
+		return nil, fmt.Errorf("pkg process, GetProcesses: %w", err)
+	}
+
+	var info []Info
+
+	for _, processObj := range proc {
+		proc, _ := p.ProcessInfo(processObj.Pid)
+		info = append(info, proc)
+	}
+
+	return info, nil
 }

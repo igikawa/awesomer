@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"awesomeProject/internal/processes"
+	"awesomeProject/internal/process"
 	"awesomeProject/pkg/logger"
 
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const HEIGHT_SPACE = 4
+const HeightSpace = 4
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -20,10 +20,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		tableWidth := msg.Width - baseStyle.GetWidth() - HEIGHT_SPACE
+		tableWidth := msg.Width - baseStyle.GetWidth() - HeightSpace
 		m.table.SetWidth(tableWidth)
-		m.table.SetHeight(msg.Height - HEIGHT_SPACE)
+		m.table.SetHeight(msg.Height - HeightSpace)
 
+	// update process list
 	case tickMsg:
 		if m.Tick == 0 {
 			break
@@ -31,7 +32,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			m.tick(),
 			func() tea.Msg {
-				rows, err := processes.GetProcesses(processes.SortMode)
+				rows, err := process.GetProcesses(process.SortMode)
 				if err != nil {
 					logger.Logger.Println(err)
 					return nil
@@ -40,6 +41,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			},
 		)
 
+	// set new process list
 	case dataMsg:
 		m.table.SetRows(msg.rows)
 
@@ -60,7 +62,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			p, err := processes.ParserObj.GetProcessInfo(int32(pid))
+			p, err := process.ParserObj.ProcessInfo(int32(pid))
 			if err != nil {
 				logger.Logger.Println(err)
 				m.info = fmt.Sprintf("Error parsing process info: %s", err)
@@ -85,26 +87,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			switch len(p.Children) {
 			case 0:
-				m.info += "\nChild processes: nothing\n"
+				m.info += "\nChild process: nothing\n"
 			default:
-				m.info += "\nChild processes:\n"
-				_, tree, err := processes.ParserObj.GetProcessTree(int32(pid))
+				m.info += "\nChild process:\n"
+				_, tree, err := process.ParserObj.ProcessTree(int32(pid))
 				if err != nil {
 					logger.Logger.Println(err)
 				}
-				s, err := processes.GetTuiTree(int32(pid), tree)
+				s, err := process.GetTuiTree(int32(pid), tree)
 				m.info += fmt.Sprintf("\n%s\n", s)
 			}
 
 			return m, nil
 
-		// processes manipulation
+		// process manipulation
 		case "k":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
 				logger.Logger.Println(err)
 			}
-			err = processes.KillProcess(pid)
+			err = process.KillProcess(pid)
 			if err != nil {
 				logger.Logger.Println(err)
 			}
@@ -115,7 +117,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				logger.Logger.Println(err)
 			}
-			err = processes.KillProcessTree(pid)
+			err = process.KillProcessTree(pid)
 			if err != nil {
 				logger.Logger.Println(err)
 			}
@@ -126,7 +128,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				logger.Logger.Println(err)
 			}
-			err = processes.StopProcess(pid)
+			err = process.StopProcess(pid)
 			if err != nil {
 				logger.Logger.Println(err)
 			}
@@ -137,7 +139,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				logger.Logger.Println(err)
 			}
-			err = processes.ResumeProcess(pid)
+			err = process.ResumeProcess(pid)
 			if err != nil {
 				logger.Logger.Println(err)
 			}
@@ -145,15 +147,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		// sort mode manipulation
 		case "n":
-			processes.SortMode = "-n"
+			process.SortMode = "-n"
 		case "c":
-			processes.SortMode = "-c"
+			process.SortMode = "-c"
 		case "m":
-			processes.SortMode = "-m"
+			process.SortMode = "-m"
 		case "t":
-			processes.SortMode = "-t"
+			process.SortMode = "-t"
 		case "p":
-			processes.SortMode = "empty"
+			process.SortMode = "empty"
 		}
 	}
 

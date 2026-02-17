@@ -2,7 +2,7 @@ package tui
 
 import (
 	"awesomeProject/internal/config"
-	"awesomeProject/internal/processes"
+	"awesomeProject/internal/process"
 	"awesomeProject/pkg/logger"
 
 	"os"
@@ -62,7 +62,7 @@ func newTable() table.Model {
 		{Title: "Threads", Width: 7},
 	}
 
-	rows, err := processes.GetProcesses(processes.SortMode)
+	rows, err := process.GetProcesses(process.SortMode)
 	if err != nil {
 		logger.Logger.Println(err)
 	}
