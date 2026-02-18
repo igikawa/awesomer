@@ -55,48 +55,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "enter": // TODO: print process info
+		case "enter":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
 				logger.Logger.Println(err)
 				return m, nil
 			}
 
-			p, err := process.ParserObj.ProcessInfo(int32(pid))
+			m.info = formatedInfo(int32(pid))
+
+			return m, nil
+		case "h":
+			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
 				logger.Logger.Println(err)
-				m.info = fmt.Sprintf("Error parsing process info: %s", err)
 				return m, nil
 			}
 
-			m.info = fmt.Sprintf("Selected process:\n\n"+
-				"PID: %d\n\n"+
-				"Name: %s\n\n"+
-				"CMD: %s\n\n",
-				p.PID, p.Name, p.Cmd)
-
-			switch len(p.OpenFiles) {
-			case 0:
-				m.info += "Opened files: nothing\n\n"
-			default:
-				m.info += "Opened files:\n"
-				for _, file := range p.OpenFiles {
-					m.info += fmt.Sprintf("\t%s\n", file)
-				}
-			}
-
-			switch len(p.Children) {
-			case 0:
-				m.info += "\nChild process: nothing\n"
-			default:
-				m.info += "\nChild process:\n"
-				_, tree, err := process.ParserObj.ProcessTree(int32(pid))
-				if err != nil {
-					logger.Logger.Println(err)
-				}
-				s, err := process.GetTuiTree(int32(pid), tree)
-				m.info += fmt.Sprintf("\n%s\n", s)
-			}
+			m.info = formatedBigInfo(int32(pid))
 
 			return m, nil
 
@@ -145,6 +121,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.info = fmt.Sprintf("Resumed process:\n\nPID: %d\n\n", pid)
 			return m, nil
+
 		// sort mode manipulation
 		case "n":
 			process.SortMode = "-n"
@@ -161,4 +138,72 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
+}
+
+func formatedInfo(pid int32) string {
+	var info string
+
+	p, err := process.ParserObj.ProcessInfo(pid)
+	if err != nil {
+		logger.Logger.Println(err)
+		info = fmt.Sprintf("Error parsing process info: %s", err)
+		return info
+	}
+
+	info = fmt.Sprintf("Selected process:\n\n"+
+		"PID: %d\n\n"+
+		"Name: %s\n\n"+
+		"CMD: %s\n\n"+
+		"Nice: %d\n\n",
+		p.PID, p.Name, p.Cmd, p.Nice)
+
+	return info
+}
+
+func formatedBigInfo(pid int32) string {
+	var info string
+
+	p, err := process.ParserObj.HardObjectParse(pid)
+	if err != nil {
+		logger.Logger.Println(err)
+		info = fmt.Sprintf("Error parsing process info: %s", err)
+		return info
+	}
+
+	switch len(p.Connections) {
+	case 0:
+		info += "\nConnections: nothing\n\n"
+	default:
+		info += "\nConnections:\n"
+		for _, conn := range p.Connections {
+			info += fmt.Sprintf("\tLocal address: %s\n", conn.LocalAddr)
+			info += fmt.Sprintf("\tRemote address: %s\n", conn.RemoteAddr)
+			info += fmt.Sprintf("\tStatus: %s\n\n", conn.Status)
+		}
+	}
+
+	switch len(p.OpenFiles) {
+	case 0:
+		info += "\nOpened files: nothing\n\n"
+	default:
+		info += "\nOpened files:\n"
+		for _, file := range p.OpenFiles {
+			info += fmt.Sprintf("\t%s\n", file)
+		}
+	}
+
+	switch len(p.Children) {
+	case 0:
+		info += "\nChild process: nothing\n\n"
+	default:
+		info += "\nChild process:\n"
+		_, tree, err := process.ParserObj.ProcessTree(int32(pid))
+		if err != nil {
+			logger.Logger.Println(err)
+		}
+		s, err := process.GetTuiTree(int32(pid), tree)
+		info += fmt.Sprintf("\n%s\n", s)
+	}
+
+	return info
 }
