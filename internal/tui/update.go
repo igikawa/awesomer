@@ -2,6 +2,7 @@ package tui
 
 import (
 	"awesomeProject/internal/process"
+	"awesomeProject/internal/process/parser"
 	"awesomeProject/pkg/logger"
 
 	"fmt"
@@ -143,7 +144,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func formatedInfo(pid int32) string {
 	var info string
 
-	p, err := process.ParserObj.ProcessInfo(pid)
+	p, err := parser.Object.ProcessInfo(pid)
 	if err != nil {
 		logger.Logger.Println(err)
 		info = fmt.Sprintf("Error parsing process info: %s", err)
@@ -154,8 +155,9 @@ func formatedInfo(pid int32) string {
 		"PID: %d\n\n"+
 		"Name: %s\n\n"+
 		"CMD: %s\n\n"+
-		"Nice: %d\n\n",
-		p.PID, p.Name, p.Cmd, p.Nice)
+		"Nice: %d\n\n"+
+		"User: %s\n\n",
+		p.PID, p.Name, p.Cmd, p.Nice, p.User)
 
 	return info
 }
@@ -163,7 +165,7 @@ func formatedInfo(pid int32) string {
 func formatedBigInfo(pid int32) string {
 	var info string
 
-	p, err := process.ParserObj.HardObjectParse(pid)
+	p, err := parser.Object.HardObjectParse(pid)
 	if err != nil {
 		logger.Logger.Println(err)
 		info = fmt.Sprintf("Error parsing process info: %s", err)
@@ -197,11 +199,11 @@ func formatedBigInfo(pid int32) string {
 		info += "\nChild process: nothing\n\n"
 	default:
 		info += "\nChild process:\n"
-		_, tree, err := process.ParserObj.ProcessTree(int32(pid))
+		_, tree, err := parser.Object.ProcessTree(pid)
 		if err != nil {
 			logger.Logger.Println(err)
 		}
-		s, err := process.GetTuiTree(int32(pid), tree)
+		s, err := process.GetTuiTree(pid, tree)
 		info += fmt.Sprintf("\n%s\n", s)
 	}
 

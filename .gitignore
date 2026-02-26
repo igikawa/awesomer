@@ -1,4 +1,5 @@
 .idea
 awesome.log
+./awesome.daemon.log
 /.env
 awesomer

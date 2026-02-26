@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"awesomeProject/internal/config"
 	"awesomeProject/internal/process"
 	"awesomeProject/pkg/logger"
 
@@ -89,14 +88,14 @@ func newTable() table.Model {
 	return t
 }
 
-func Run() error {
+func Run(tick int) error {
 
 	t := newTable()
 
 	m := model{
 		table:  t,
 		info:   INFO,
-		Tick:   config.NewConfig().Tick,
+		Tick:   tick,
 		width:  80,
 		height: 20,
 	}

@@ -1,6 +1,7 @@
 package process
 
 import (
+	"awesomeProject/internal/process/parser"
 	"fmt"
 	"os"
 	"slices"
@@ -8,16 +9,13 @@ import (
 	"strings"
 	"syscall"
 
-	"awesomeProject/pkg/cgroups"
-
 	"github.com/charmbracelet/bubbles/table"
-	"github.com/google/uuid"
 )
 
 var SortMode string
 
 func GetProcesses(sortMod string) ([]table.Row, error) {
-	proc, err := ParserObj.AllProcessess()
+	proc, err := parser.Object.AllProcessess()
 	if err != nil {
 		return nil, fmt.Errorf("pkg process, GetProcesses: %w", err)
 	}
@@ -46,8 +44,8 @@ func GetProcesses(sortMod string) ([]table.Row, error) {
 	return info, nil
 }
 
-func sortByCPU(proc []Info) {
-	slices.SortFunc(proc, func(a, b Info) int {
+func sortByCPU(proc []parser.Info) {
+	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.CPUPercent > b.CPUPercent {
 			return -1
 		} else if a.CPUPercent < b.CPUPercent {
@@ -57,8 +55,8 @@ func sortByCPU(proc []Info) {
 	})
 }
 
-func sortByMem(proc []Info) {
-	slices.SortFunc(proc, func(a, b Info) int {
+func sortByMem(proc []parser.Info) {
+	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.MemPercent > b.MemPercent {
 			return -1
 		} else if a.MemPercent < b.MemPercent {
@@ -68,8 +66,8 @@ func sortByMem(proc []Info) {
 	})
 }
 
-func sortByThreads(proc []Info) {
-	slices.SortFunc(proc, func(a, b Info) int {
+func sortByThreads(proc []parser.Info) {
+	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.Threads > b.Threads {
 			return -1
 		} else if a.Threads < b.Threads {
@@ -79,7 +77,7 @@ func sortByThreads(proc []Info) {
 	})
 }
 
-func sortByName(proc []Info) {
+func sortByName(proc []parser.Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iName := proc[i].Name
 		jName := proc[j].Name
@@ -161,7 +159,7 @@ func KillProcess(pid int) error {
 }
 
 func KillProcessTree(pid int) error {
-	tree, _, err := ParserObj.ProcessTree(int32(pid))
+	tree, _, err := parser.Object.ProcessTree(int32(pid))
 	if err != nil {
 		return fmt.Errorf("pkg process, KillProcessTree: %w", err)
 	}
@@ -175,22 +173,6 @@ func KillProcessTree(pid int) error {
 		if err != nil {
 			return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
 		}
-	}
-
-	return nil
-}
-
-func SetProcessThrottling(pid int, limit string) error {
-	_, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("pkg process, SetProcessThrottling: %w", err)
-	}
-
-	cgroupName := uuid.NewString()
-
-	err = cgroups.SetCPUMax(pid, cgroupName, fmt.Sprintf("%s 100000", limit))
-	if err != nil {
-		return fmt.Errorf("pkg process, SetProcessThrottling: %w", err)
 	}
 
 	return nil

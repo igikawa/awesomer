@@ -1,4 +1,4 @@
-package process
+package parser
 
 import (
 	"awesomeProject/pkg/logger"
@@ -9,47 +9,21 @@ import (
 )
 
 func init() {
-	ParserObj = NewParser()
+	Object = NewParser()
 }
 
 var (
-	ParserObj ParserAbstractionLayer
+	Object AbstractionLayer
 )
 
-type ParserAbstractionLayer interface {
+type AbstractionLayer interface {
 	AllProcessess() ([]Info, error)
 	ProcessInfo(pid int32) (Info, error)
 	ProcessTree(pid int32) ([]int32, map[int32][]int32, error)
 	HardObjectParse(pid int32) (Info, error)
 }
 
-type ChildInfo struct {
-	PID  int32
-	Name string
-}
-
-type NetworkInfo struct {
-	LocalAddr  string
-	RemoteAddr string
-	Status     string
-}
-
-type Info struct {
-	PPID       int32
-	PID        int32
-	Name       string
-	CPUPercent float64
-	MemPercent float32
-	Threads    int32
-	Cmd        string
-	Nice       int32
-
-	// big rows it is parsing a HardObjectParse func:
-	Connections []NetworkInfo
-	OpenFiles   []string
-	Children    []ChildInfo
-}
-
+// Parser is implementing AbstractionLayer
 type Parser struct{}
 
 func NewParser() *Parser {
@@ -89,45 +63,24 @@ func (p *Parser) ProcessInfo(pid int32) (Info, error) {
 		logger.Logger.Println(err)
 	}
 
-	name, err := proc.Name()
-	if err != nil {
-		logger.Logger.Println(err)
-	}
-
-	cpu, err := proc.CPUPercent()
-	if err != nil {
-		logger.Logger.Println(err)
-	}
-
-	mem, err := proc.MemoryPercent()
-	if err != nil {
-		logger.Logger.Println(err)
-	}
-
-	threads, err := proc.NumThreads()
-	if err != nil {
-		logger.Logger.Println(err)
-	}
-
-	cmd, err := proc.Cmdline()
-	if err != nil {
-		logger.Logger.Println(err)
-	}
-
-	nice, err := proc.Nice()
-	if err != nil {
-		logger.Logger.Println(err)
-	}
+	name, _ := proc.Name()
+	cpu, _ := proc.CPUPercent()
+	mem, _ := proc.MemoryPercent()
+	threads, _ := proc.NumThreads()
+	cmd, _ := proc.Cmdline()
+	nice, _ := proc.Nice()
+	user, _ := proc.Username()
 
 	return Info{
 		PPID:       ppid,
 		PID:        pid,
 		Name:       name,
 		CPUPercent: cpu,
-		MemPercent: mem,
+		MemPercent: float64(mem),
 		Threads:    threads,
 		Cmd:        cmd,
 		Nice:       nice,
+		User:       user,
 	}, nil
 }
 
