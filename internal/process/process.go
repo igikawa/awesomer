@@ -1,7 +1,9 @@
 package process
 
 import (
+	daemonAPI "awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/process/parser"
+
 	"fmt"
 	"os"
 	"slices"
@@ -29,16 +31,24 @@ func GetProcesses(sortMod string) ([]table.Row, error) {
 		sortByMem(proc)
 	case "-t":
 		sortByThreads(proc)
+	case "-u":
+		sortByUser(proc)
 	}
 
 	var info []table.Row
 	for _, p := range proc {
+		var out string
+		if isControlling := daemonAPI.InJail(int(p.PID)); isControlling {
+			out = "*"
+		}
 		info = append(info, table.Row{
 			fmt.Sprintf("%d", p.PID),
 			fmt.Sprintf("%s", p.Name),
 			fmt.Sprintf("%.2f %%", p.CPUPercent),
 			fmt.Sprintf("%.2f %%", p.MemPercent),
 			fmt.Sprintf("%d", p.Threads),
+			fmt.Sprintf("%s", p.User),
+			fmt.Sprintf("%s", out),
 		})
 	}
 	return info, nil
@@ -82,6 +92,14 @@ func sortByName(proc []parser.Info) {
 		iName := proc[i].Name
 		jName := proc[j].Name
 		return iName < jName
+	})
+}
+
+func sortByUser(proc []parser.Info) {
+	sort.Slice(proc, func(i, j int) bool {
+		iUser := proc[i].User
+		jUser := proc[j].User
+		return iUser < jUser
 	})
 }
 

@@ -25,7 +25,11 @@ func AddProcessToGroup(pid int, groupName string) error {
 			return err
 		}
 	}
-	err := os.WriteFile(fmt.Sprintf("/sys/fs/cgroup/%s/cgroup.procs", groupName), []byte(strconv.Itoa(pid)), 0644)
+	err := os.WriteFile(
+		fmt.Sprintf("/sys/fs/cgroup/%s/cgroup.procs", groupName),
+		[]byte(strconv.Itoa(pid)),
+		0644,
+	)
 	if err != nil {
 		logger.Logger.Printf("Failed to add process to cgroup: %v", err)
 		return err

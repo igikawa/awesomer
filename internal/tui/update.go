@@ -46,6 +46,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dataMsg:
 		m.table.SetRows(msg.rows)
 
+	// keyboard shortcuts
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
@@ -134,6 +135,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			process.SortMode = "-t"
 		case "p":
 			process.SortMode = "empty"
+		case "u":
+			process.SortMode = "-u"
 		}
 	}
 

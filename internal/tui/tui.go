@@ -13,12 +13,14 @@ import (
 )
 
 const INFO = "Info\n\n" +
-	"↑↓ - select process\n" +
-	"Enter - show process info\n" +
-	"S - stop process\n\n" +
-	"R - resume process\n\n" +
-	"D - kill process\n\n" +
-	"Q - exit\n\n"
+	"↑↓ - select process\n\n" +
+	"Enter - show process info\n\n" +
+	"h - show big process info\n\n" +
+	"s - stop process\n\n" +
+	"r - resume process\n\n" +
+	"k - kill process\n\n" +
+	"d - kill process tree\n\n" +
+	"q - exit\n\n"
 
 type tickMsg time.Time
 
@@ -56,9 +58,11 @@ func newTable() table.Model {
 	columns := []table.Column{
 		{Title: "PID", Width: 10},
 		{Title: "Name", Width: 20},
-		{Title: "CPU", Width: 15},
-		{Title: "Mem", Width: 15},
+		{Title: "CPU", Width: 7},
+		{Title: "Mem", Width: 7},
 		{Title: "Threads", Width: 7},
+		{Title: "User", Width: 10},
+		{Title: "", Width: 7}, // is controlling with daemon
 	}
 
 	rows, err := process.GetProcesses(process.SortMode)
