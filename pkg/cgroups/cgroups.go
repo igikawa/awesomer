@@ -1,7 +1,6 @@
 package cgroups
 
 import (
-	"awesomeProject/pkg/logger"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,13 +10,12 @@ import (
 func CreateProcessGroup(groupName string) error {
 	err := os.Mkdir(fmt.Sprintf("/sys/fs/cgroup/%s", groupName), 0755)
 	if err != nil && !os.IsExist(err) {
-		logger.Logger.Printf("Failed to create cgroup directory: %v", err)
-		return err
+		return fmt.Errorf("failed to create cgroup directory: %v", err)
 	}
 	return nil
 }
 
-// AddProcessToGroup adds process on group
+// AddProcessToGroup adds service on group
 func AddProcessToGroup(pid int, groupName string) error {
 	if !checkExistGroup(groupName) {
 		err := CreateProcessGroup(groupName)
@@ -31,8 +29,7 @@ func AddProcessToGroup(pid int, groupName string) error {
 		0644,
 	)
 	if err != nil {
-		logger.Logger.Printf("Failed to add process to cgroup: %v", err)
-		return err
+		return fmt.Errorf("failed to add process to cgroup: %v", err)
 	}
 	return nil
 }
@@ -51,8 +48,7 @@ func SetGroupRow(groupName, row, val string) error {
 	}
 	err := os.WriteFile(fmt.Sprintf("/sys/fs/cgroup/%s/%s", groupName, row), []byte(val), 0644)
 	if err != nil {
-		logger.Logger.Printf("cgroups, SetGroupRow: %v", err)
-		return err
+		return fmt.Errorf("cgroups, SetGroupRow: %v", err)
 	}
 	return nil
 }

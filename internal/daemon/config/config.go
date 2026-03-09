@@ -8,5 +8,5 @@ type Config struct {
 	RAMLimit float64 `env:"DAEMON_RAM_LIMIT" env-default:"60"`
 
 	CPUQuota float64 `env:"DAEMON_CPU_QUOTA" env-default:"20"`
-	RAMQuota int     `env:"DAEMON_RAM_QUOTA" env-default:"1000000000"`
+	RAMQuota string  `env:"DAEMON_RAM_QUOTA" env-default:"8G"`
 }

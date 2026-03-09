@@ -1,8 +1,12 @@
 package tui
 
 import (
-	"awesomeProject/internal/process"
+	"awesomeProject/internal/config"
+	daemonAPI "awesomeProject/internal/daemon/info"
+	"awesomeProject/internal/service"
+	"awesomeProject/internal/service/parser"
 	"awesomeProject/pkg/logger"
+	"log"
 
 	"os"
 	"time"
@@ -13,13 +17,13 @@ import (
 )
 
 const INFO = "Info\n\n" +
-	"↑↓ - select process\n\n" +
-	"Enter - show process info\n\n" +
-	"h - show big process info\n\n" +
-	"s - stop process\n\n" +
-	"r - resume process\n\n" +
-	"k - kill process\n\n" +
-	"d - kill process tree\n\n" +
+	"↑↓ - select service\n\n" +
+	"Enter - show service info\n\n" +
+	"h - show big service info\n\n" +
+	"s - stop service\n\n" +
+	"r - resume service\n\n" +
+	"k - kill service\n\n" +
+	"d - kill service tree\n\n" +
 	"q - exit\n\n"
 
 type tickMsg time.Time
@@ -34,6 +38,10 @@ type model struct {
 	Tick   int
 	width  int
 	height int
+
+	Service *service.Service
+	Logger  *log.Logger
+	Parser  *parser.Parser
 }
 
 var baseStyle = lipgloss.NewStyle().
@@ -65,14 +73,8 @@ func newTable() table.Model {
 		{Title: "", Width: 7}, // is controlling with daemon
 	}
 
-	rows, err := process.GetProcesses(process.SortMode)
-	if err != nil {
-		logger.Logger.Println(err)
-	}
-
 	t := table.New(
 		table.WithColumns(columns),
-		table.WithRows(rows),
 		table.WithFocused(true),
 		table.WithHeight(20),
 	)
@@ -92,20 +94,31 @@ func newTable() table.Model {
 	return t
 }
 
-func Run(tick int) error {
+func Run(cfg *config.Config, api *daemonAPI.API) error {
+
+	l, err := logger.NewLogger(&cfg.LoggerConfig)
+	if err != nil {
+		return err
+	}
 
 	t := newTable()
 
 	m := model{
 		table:  t,
 		info:   INFO,
-		Tick:   tick,
+		Tick:   cfg.Tick,
 		width:  80,
 		height: 20,
+
+		Service: service.New(api),
+		Logger:  l,
+		Parser:  parser.NewParser(),
 	}
+
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		defer os.Exit(1)
 		return err
 	}
+
 	return nil
 }

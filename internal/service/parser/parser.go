@@ -1,19 +1,9 @@
 package parser
 
 import (
-	"awesomeProject/pkg/logger"
-
 	"fmt"
 
 	"github.com/shirou/gopsutil/v4/process"
-)
-
-func init() {
-	Object = NewParser()
-}
-
-var (
-	Object AbstractionLayer
 )
 
 type AbstractionLayer interface {
@@ -60,7 +50,7 @@ func (p *Parser) ProcessInfo(pid int32) (Info, error) {
 
 	ppid, err := proc.Ppid()
 	if err != nil {
-		logger.Logger.Println(err)
+		return Info{}, err
 	}
 
 	name, _ := proc.Name()
@@ -87,7 +77,7 @@ func (p *Parser) ProcessInfo(pid int32) (Info, error) {
 func (p *Parser) AllProcessess() ([]Info, error) {
 	proc, err := process.Processes()
 	if err != nil {
-		return nil, fmt.Errorf("pkg process, GetProcesses: %w", err)
+		return nil, fmt.Errorf("pkg service, GetProcesses: %w", err)
 	}
 
 	var info []Info
@@ -105,7 +95,7 @@ func (p *Parser) HardObjectParse(pid int32) (Info, error) {
 
 	connections, err := proc.Connections()
 	if err != nil {
-		logger.Logger.Println(err)
+		return Info{}, err
 	}
 	var formatedConnections []NetworkInfo
 	for _, connection := range connections {
@@ -118,7 +108,7 @@ func (p *Parser) HardObjectParse(pid int32) (Info, error) {
 
 	openFiles, err := proc.OpenFiles()
 	if err != nil {
-		logger.Logger.Println(err)
+		return Info{}, err
 	}
 	var formatedOpenFiles []string
 	for _, f := range openFiles {
@@ -129,7 +119,7 @@ func (p *Parser) HardObjectParse(pid int32) (Info, error) {
 
 	children, err := proc.Children()
 	if err != nil {
-		logger.Logger.Println(err)
+		return Info{}, err
 	}
 	var formattedChildren []ChildInfo
 	for _, c := range children {

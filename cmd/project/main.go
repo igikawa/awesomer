@@ -3,8 +3,10 @@ package main
 import (
 	"awesomeProject/internal/config"
 	"awesomeProject/internal/daemon"
+	"awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/tui"
 	"awesomeProject/pkg/logger"
+	"log"
 
 	"fmt"
 	"os"
@@ -22,20 +24,24 @@ func main() {
 	}
 
 	cfg := config.NewConfig()
-
-	logger.NewLogger(cfg.LoggerConfig)
+	apiInstance := info.NewAPI()
 
 	if cfg.Daemon.Run {
 		go func() {
-			err := daemon.Run(cfg.Daemon)
+			l, err := logger.NewDaemonLogger(&cfg.LoggerConfig)
 			if err != nil {
-				logger.DaemonLogger.Fatal(err)
+				panic(err)
+			}
+			d := daemon.New(&cfg.Daemon, l, apiInstance)
+
+			if err := d.Run(); err != nil {
+				log.Fatal(err)
 			}
 		}()
 	}
 
-	err = tui.Run(cfg.Tick)
+	err = tui.Run(cfg, apiInstance)
 	if err != nil {
-		logger.Logger.Println("Error running program:", err)
+		log.Fatal(err)
 	}
 }

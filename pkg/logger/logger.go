@@ -10,19 +10,21 @@ type Config struct {
 	DaemonLogPath string `env:"DAEMON_LOG_PATH" env-default:"./awesome.daemon.log"`
 }
 
-var Logger *log.Logger
-var DaemonLogger *log.Logger
-
-func NewLogger(cfg Config) {
+func NewLogger(cfg *Config) (*log.Logger, error) {
 	logFile, err := os.OpenFile(cfg.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		panic(err)
-	}
-	daemonLogFile, err := os.OpenFile(cfg.DaemonLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	Logger = log.New(logFile, "", log.Ldate|log.Ltime|log.Lshortfile)
-	DaemonLogger = log.New(daemonLogFile, "", log.Ldate|log.Ltime|log.Lshortfile)
+	Logger := log.New(logFile, "", log.Ldate|log.Ltime|log.Lshortfile)
+	return Logger, nil
+}
+
+func NewDaemonLogger(cfg *Config) (*log.Logger, error) {
+	logFile, err := os.OpenFile(cfg.DaemonLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return nil, err
+	}
+	Logger := log.New(logFile, "", log.Ldate|log.Ltime|log.Lshortfile)
+	return Logger, nil
 }

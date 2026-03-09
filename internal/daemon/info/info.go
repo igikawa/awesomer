@@ -1,36 +1,42 @@
 package info
 
-import "sync"
+import (
+	"sync"
+)
 
-func init() {
-	mu = sync.Mutex{}
-	jail = make(map[int]bool)
+type API struct {
+	mu   sync.Mutex
+	jail map[int]bool
 }
 
-var mu sync.Mutex
-var jail map[int]bool
+func NewAPI() *API {
+	return &API{
+		mu:   sync.Mutex{},
+		jail: make(map[int]bool),
+	}
+}
 
-func InJail(pid int) bool {
-	mu.Lock()
-	defer mu.Unlock()
+func (a *API) InJail(pid int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
-	if find, ok := jail[pid]; !ok || !find {
+	if find, ok := a.jail[pid]; !ok || !find {
 		return false
 	}
 
 	return true
 }
 
-func SetJail(pid int) {
-	mu.Lock()
-	defer mu.Unlock()
+func (a *API) SetJail(pid int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
-	jail[pid] = true
+	a.jail[pid] = true
 }
 
-func DeleteFromJail(pid int) {
-	mu.Lock()
-	defer mu.Unlock()
+func (a *API) DeleteFromJail(pid int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
-	delete(jail, pid)
+	delete(a.jail, pid)
 }

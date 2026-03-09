@@ -1,8 +1,9 @@
-package process
+package service
 
 import (
 	daemonAPI "awesomeProject/internal/daemon/info"
-	"awesomeProject/internal/process/parser"
+	"awesomeProject/internal/service/parser"
+	"sync"
 
 	"fmt"
 	"os"
@@ -14,31 +15,45 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 )
 
-var SortMode string
+type Service struct {
+	p           *parser.Parser
+	mu          *sync.RWMutex
+	daemon      *daemonAPI.API
+	sortProcMod string
+}
 
-func GetProcesses(sortMod string) ([]table.Row, error) {
-	proc, err := parser.Object.AllProcessess()
+func New(d *daemonAPI.API) *Service {
+	return &Service{
+		p:           parser.NewParser(),
+		mu:          &sync.RWMutex{},
+		daemon:      d,
+		sortProcMod: "empty",
+	}
+}
+
+func (s *Service) GetProcesses() ([]table.Row, error) {
+	proc, err := s.p.AllProcessess()
 	if err != nil {
-		return nil, fmt.Errorf("pkg process, GetProcesses: %w", err)
+		return nil, fmt.Errorf("pkg service, GetProcesses: %w", err)
 	}
 
-	switch sortMod {
+	switch s.sortProcMod {
 	case "-n":
-		sortByName(proc)
+		s.sortByName(proc)
 	case "-c":
-		sortByCPU(proc)
+		s.sortByCPU(proc)
 	case "-m":
-		sortByMem(proc)
+		s.sortByMem(proc)
 	case "-t":
-		sortByThreads(proc)
+		s.sortByThreads(proc)
 	case "-u":
-		sortByUser(proc)
+		s.sortByUser(proc)
 	}
 
 	var info []table.Row
 	for _, p := range proc {
 		var out string
-		if isControlling := daemonAPI.InJail(int(p.PID)); isControlling {
+		if isControlling := s.daemon.InJail(int(p.PID)); isControlling {
 			out = "*"
 		}
 		info = append(info, table.Row{
@@ -54,7 +69,13 @@ func GetProcesses(sortMod string) ([]table.Row, error) {
 	return info, nil
 }
 
-func sortByCPU(proc []parser.Info) {
+func (s *Service) SetSortProcMod(sortMod string) {
+	s.mu.Lock()
+	s.sortProcMod = sortMod
+	s.mu.Unlock()
+}
+
+func (s *Service) sortByCPU(proc []parser.Info) {
 	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.CPUPercent > b.CPUPercent {
 			return -1
@@ -65,7 +86,7 @@ func sortByCPU(proc []parser.Info) {
 	})
 }
 
-func sortByMem(proc []parser.Info) {
+func (s *Service) sortByMem(proc []parser.Info) {
 	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.MemPercent > b.MemPercent {
 			return -1
@@ -76,7 +97,7 @@ func sortByMem(proc []parser.Info) {
 	})
 }
 
-func sortByThreads(proc []parser.Info) {
+func (s *Service) sortByThreads(proc []parser.Info) {
 	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.Threads > b.Threads {
 			return -1
@@ -87,7 +108,7 @@ func sortByThreads(proc []parser.Info) {
 	})
 }
 
-func sortByName(proc []parser.Info) {
+func (s *Service) sortByName(proc []parser.Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iName := proc[i].Name
 		jName := proc[j].Name
@@ -95,7 +116,7 @@ func sortByName(proc []parser.Info) {
 	})
 }
 
-func sortByUser(proc []parser.Info) {
+func (s *Service) sortByUser(proc []parser.Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iUser := proc[i].User
 		jUser := proc[j].User
@@ -103,7 +124,7 @@ func sortByUser(proc []parser.Info) {
 	})
 }
 
-func GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
+func (s *Service) GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("%d\n", root))
@@ -140,56 +161,56 @@ func GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
 	return sb.String(), nil
 }
 
-func StopProcess(pid int) error {
+func (s *Service) StopProcess(pid int) error {
 	stop, err := os.FindProcess(pid)
 	if err != nil {
-		return fmt.Errorf("pkg process, StopProcesses: %w", err)
+		return fmt.Errorf("pkg service, StopProcesses: %w", err)
 	}
 	err = stop.Signal(syscall.SIGSTOP)
 	if err != nil {
-		return fmt.Errorf("pkg process, StopProcesses: %w", err)
+		return fmt.Errorf("pkg service, StopProcesses: %w", err)
 	}
 	return nil
 }
 
-func ResumeProcess(pid int) error {
+func (s *Service) ResumeProcess(pid int) error {
 	resume, err := os.FindProcess(pid)
 	if err != nil {
-		return fmt.Errorf("pkg process, ResumeProcesses: %w", err)
+		return fmt.Errorf("pkg service, ResumeProcesses: %w", err)
 	}
 	err = resume.Signal(syscall.SIGCONT)
 	if err != nil {
-		return fmt.Errorf("pkg process, ResumeProcesses: %w", err)
+		return fmt.Errorf("pkg service, ResumeProcesses: %w", err)
 	}
 	return nil
 }
 
-func KillProcess(pid int) error {
+func (s *Service) KillProcess(pid int) error {
 	kill, err := os.FindProcess(pid)
 	if err != nil {
-		return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
+		return fmt.Errorf("pkg service, CompleteProcesses: %w", err)
 	}
 	err = kill.Signal(syscall.SIGKILL)
 	if err != nil {
-		return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
+		return fmt.Errorf("pkg service, CompleteProcesses: %w", err)
 	}
 	return nil
 }
 
-func KillProcessTree(pid int) error {
-	tree, _, err := parser.Object.ProcessTree(int32(pid))
+func (s *Service) KillProcessTree(pid int) error {
+	tree, _, err := s.p.ProcessTree(int32(pid))
 	if err != nil {
-		return fmt.Errorf("pkg process, KillProcessTree: %w", err)
+		return fmt.Errorf("pkg service, KillProcessTree: %w", err)
 	}
 
 	for i := range tree {
 		kill, err := os.FindProcess(int(tree[i]))
 		if err != nil {
-			return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
+			return fmt.Errorf("pkg service, CompleteProcesses: %w", err)
 		}
 		err = kill.Signal(syscall.SIGKILL)
 		if err != nil {
-			return fmt.Errorf("pkg process, CompleteProcesses: %w", err)
+			return fmt.Errorf("pkg service, CompleteProcesses: %w", err)
 		}
 	}
 

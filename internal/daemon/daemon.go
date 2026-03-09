@@ -3,9 +3,9 @@ package daemon
 import (
 	"awesomeProject/internal/daemon/config"
 	"awesomeProject/internal/daemon/info"
-	"awesomeProject/internal/process/parser"
+	"awesomeProject/internal/service/parser"
 	"awesomeProject/pkg/cgroups"
-	"awesomeProject/pkg/logger"
+	"log"
 
 	"fmt"
 	"sync"
@@ -16,26 +16,44 @@ import (
 
 const CgroupName = "processJail"
 
-func Run(cfg config.Config) error {
+type Daemon struct {
+	cfg   *config.Config
+	l     *log.Logger
+	parse *parser.Parser
+	mu    *sync.Mutex
+	api   *info.API
+}
+
+func New(cfg *config.Config, l *log.Logger, api *info.API) *Daemon {
+	return &Daemon{
+		cfg:   cfg,
+		l:     l,
+		parse: parser.NewParser(),
+		mu:    &sync.Mutex{},
+		api:   api,
+	}
+}
+
+func (d *Daemon) Run() error {
 	jail := make(map[int]int)
 	mu := &sync.RWMutex{}
 
-	go realTimeReadConfig(&cfg, mu)
+	go d.realTimeReadConfig()
 
 	err := cgroups.CreateProcessGroup(CgroupName)
 	if err != nil {
-		logger.DaemonLogger.Println("Failed to create process group:", err)
+		d.l.Println("Failed to create service group:", err)
 		return err
 	}
 
-	err = cgroups.SetGroupRow(CgroupName, "cpu.max", fmt.Sprintf("%d 100000", int(cfg.CPUQuota)*1000))
+	err = cgroups.SetGroupRow(CgroupName, "cpu.max", fmt.Sprintf("%d 100000", int(d.cfg.CPUQuota)*1000))
 	if err != nil {
-		logger.DaemonLogger.Println("Failed to set CPU quota:", err)
+		d.l.Println("Failed to set CPU quota:", err)
 		return err
 	}
-	err = cgroups.SetGroupRow(CgroupName, "memory.max", fmt.Sprintf("%d", cfg.RAMQuota))
+	err = cgroups.SetGroupRow(CgroupName, "memory.max", fmt.Sprintf("%s", d.cfg.RAMQuota))
 	if err != nil {
-		logger.DaemonLogger.Println("Failed to set memory quota:", err)
+		d.l.Println("Failed to set memory quota:", err)
 		return err
 	}
 
@@ -43,21 +61,21 @@ func Run(cfg config.Config) error {
 
 	for {
 		mu.RLock()
-		cpuLim := cfg.CPULimit
-		memLim := cfg.RAMLimit
-		tick := cfg.Tick
-		isRunning := cfg.Run
+		cpuLim := d.cfg.CPULimit
+		memLim := d.cfg.RAMLimit
+		tick := d.cfg.Tick
+		isRunning := d.cfg.Run
 		mu.RUnlock()
 
 		if !isRunning {
-			logger.DaemonLogger.Println("Daemon is stopped")
+			d.l.Println("Daemon is stopped")
 			break
 		}
 
-		procs, err := parser.Object.AllProcessess()
+		procs, err := d.parse.AllProcessess()
 
 		if err != nil {
-			logger.DaemonLogger.Println(err.Error())
+			d.l.Println(err.Error())
 		}
 		activePIDs := make(map[int]bool)
 		for _, p := range procs {
@@ -68,18 +86,21 @@ func Run(cfg config.Config) error {
 			if p.CPUPercent > cpuLim || p.MemPercent > memLim {
 				jail[int(p.PID)]++
 				if jail[int(p.PID)] >= 3 {
-					tree, _, _ := parser.Object.ProcessTree(p.PID)
+					tree, _, _ := d.parse.ProcessTree(p.PID)
 					for _, memberPid := range tree {
 						err := cgroups.AddProcessToGroup(int(memberPid), CgroupName)
-						info.SetJail(int(memberPid))
-						logger.DaemonLogger.Printf("Added process to Jail: %d, err: %s\n", int(memberPid), err)
+						if err != nil {
+							d.l.Printf("error added process %d in jail: %s", memberPid, err.Error())
+							continue
+						}
+						d.api.SetJail(int(memberPid))
 					}
 				}
 			}
 		}
 		for pid := range jail {
 			if !activePIDs[pid] {
-				info.DeleteFromJail(pid)
+				d.api.DeleteFromJail(pid)
 				delete(jail, pid)
 			}
 		}
@@ -89,16 +110,27 @@ func Run(cfg config.Config) error {
 	return nil
 }
 
-func realTimeReadConfig(conf *config.Config, mu *sync.RWMutex) {
-	var readConf = func() config.Config {
+func (d *Daemon) realTimeReadConfig() {
+	var readConf = func() (config.Config, error) {
 		var cfg config.Config
-		cleanenv.ReadConfig(".env", &cfg)
-		return cfg
+		err := cleanenv.ReadConfig(".env", &cfg)
+		if err != nil {
+			return cfg, err
+		}
+		return cfg, nil
 	}
 	for {
-		mu.Lock()
-		*conf = readConf()
-		mu.Unlock()
+		d.mu.Lock()
+		c, err := readConf()
+		if err != nil {
+			d.l.Println("Failed to read config:", err)
+			d.mu.Unlock()
+			time.Sleep(time.Second)
+			continue
+		}
+		*d.cfg = c
+		d.mu.Unlock()
+
 		time.Sleep(time.Second)
 	}
 }
