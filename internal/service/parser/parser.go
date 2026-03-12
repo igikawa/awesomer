@@ -2,12 +2,14 @@ package parser
 
 import (
 	"fmt"
+	"runtime"
+	"sync"
 
 	"github.com/shirou/gopsutil/v4/process"
 )
 
 type AbstractionLayer interface {
-	AllProcessess() ([]Info, error)
+	AllProcesses() ([]Info, error)
 	ProcessInfo(pid int32) (Info, error)
 	ProcessTree(pid int32) ([]int32, map[int32][]int32, error)
 	HardObjectParse(pid int32) (Info, error)
@@ -21,7 +23,7 @@ func NewParser() *Parser {
 }
 
 func (p *Parser) ProcessTree(pid int32) ([]int32, map[int32][]int32, error) {
-	proc, err := p.AllProcessess()
+	proc, err := p.AllProcesses()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -74,7 +76,7 @@ func (p *Parser) ProcessInfo(pid int32) (Info, error) {
 	}, nil
 }
 
-func (p *Parser) AllProcessess() ([]Info, error) {
+func (p *Parser) AllProcesses() ([]Info, error) {
 	proc, err := process.Processes()
 	if err != nil {
 		return nil, fmt.Errorf("pkg service, GetProcesses: %w", err)
@@ -82,9 +84,36 @@ func (p *Parser) AllProcessess() ([]Info, error) {
 
 	var info []Info
 
-	for _, processObj := range proc {
-		proc, _ := p.ProcessInfo(processObj.Pid)
-		info = append(info, proc)
+	numWorkers := runtime.NumCPU() * 2
+	jobs := make(chan int32, len(proc))
+	results := make(chan Info)
+	wg := sync.WaitGroup{}
+
+	wg.Add(numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			for pid := range jobs {
+				procObj, err := p.ProcessInfo(pid)
+				if err == nil {
+					results <- procObj
+				}
+			}
+		}()
+	}
+
+	for _, j := range proc {
+		jobs <- j.Pid
+	}
+	close(jobs)
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for processObj := range results {
+		info = append(info, processObj)
 	}
 
 	return info, nil

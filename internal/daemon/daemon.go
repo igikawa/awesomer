@@ -5,9 +5,9 @@ import (
 	"awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/service/parser"
 	"awesomeProject/pkg/cgroups"
-	"log"
-
+	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -34,11 +34,11 @@ func New(cfg *config.Config, l *log.Logger, api *info.API) *Daemon {
 	}
 }
 
-func (d *Daemon) Run() error {
+func (d *Daemon) Run(ctx context.Context) error {
 	jail := make(map[int]int)
 	mu := &sync.RWMutex{}
 
-	go d.realTimeReadConfig()
+	go d.realTimeReadConfig(ctx)
 
 	err := cgroups.CreateProcessGroup(CgroupName)
 	if err != nil {
@@ -60,57 +60,68 @@ func (d *Daemon) Run() error {
 	fmt.Println("Daemon is running")
 
 	for {
-		mu.RLock()
-		cpuLim := d.cfg.CPULimit
-		memLim := d.cfg.RAMLimit
-		tick := d.cfg.Tick
-		isRunning := d.cfg.Run
-		mu.RUnlock()
-
-		if !isRunning {
-			d.l.Println("Daemon is stopped")
-			break
-		}
-
-		procs, err := d.parse.AllProcessess()
-
-		if err != nil {
-			d.l.Println(err.Error())
-		}
-		activePIDs := make(map[int]bool)
-		for _, p := range procs {
-			activePIDs[int(p.PID)] = true
-			if p.PID < 100 || p.Name == "systemd" || p.Name == "sshd" {
-				continue
+		select {
+		case <-ctx.Done():
+			err := cgroups.DeleteProcessGroup(CgroupName)
+			if err != nil {
+				d.l.Println("Failed to delete service group:", err)
 			}
-			if p.CPUPercent > cpuLim || p.MemPercent > memLim {
-				jail[int(p.PID)]++
-				if jail[int(p.PID)] >= 3 {
-					tree, _, _ := d.parse.ProcessTree(p.PID)
-					for _, memberPid := range tree {
-						err := cgroups.AddProcessToGroup(int(memberPid), CgroupName)
-						if err != nil {
-							d.l.Printf("error added process %d in jail: %s", memberPid, err.Error())
-							continue
+			d.l.Println("Daemon is stopped")
+			return nil
+		default:
+			mu.RLock()
+			cpuLim := d.cfg.CPULimit
+			memLim := d.cfg.RAMLimit
+			tick := d.cfg.Tick
+			isRunning := d.cfg.Run
+			mu.RUnlock()
+
+			if !isRunning {
+				d.l.Println("Daemon is stopped")
+				break
+			}
+
+			procs, err := d.parse.AllProcesses()
+
+			if err != nil {
+				d.l.Println(err.Error())
+			}
+			activePIDs := make(map[int]bool)
+
+			for _, p := range procs {
+				activePIDs[int(p.PID)] = true
+				if p.PID < 100 || p.Name == "systemd" || p.Name == "sshd" {
+					continue
+				}
+				if p.CPUPercent > cpuLim || p.MemPercent > memLim {
+					jail[int(p.PID)]++
+					if jail[int(p.PID)] >= 3 {
+						tree, _, _ := d.parse.ProcessTree(p.PID)
+						for _, memberPid := range tree {
+							err := cgroups.AddProcessToGroup(int(memberPid), CgroupName)
+							if err != nil {
+								d.l.Printf("error added process %d in jail: %s", memberPid, err.Error())
+								continue
+							}
+							d.api.SetJail(int(memberPid))
+							d.l.Printf("added process %d in jail", memberPid)
 						}
-						d.api.SetJail(int(memberPid))
 					}
 				}
 			}
-		}
-		for pid := range jail {
-			if !activePIDs[pid] {
-				d.api.DeleteFromJail(pid)
-				delete(jail, pid)
+			for pid := range jail {
+				if !activePIDs[pid] {
+					d.api.DeleteFromJail(pid)
+					delete(jail, pid)
+				}
 			}
-		}
 
-		time.Sleep(time.Duration(tick) * time.Second)
+			time.Sleep(time.Duration(tick) * time.Second)
+		}
 	}
-	return nil
 }
 
-func (d *Daemon) realTimeReadConfig() {
+func (d *Daemon) realTimeReadConfig(ctx context.Context) {
 	var readConf = func() (config.Config, error) {
 		var cfg config.Config
 		err := cleanenv.ReadConfig(".env", &cfg)
@@ -120,17 +131,22 @@ func (d *Daemon) realTimeReadConfig() {
 		return cfg, nil
 	}
 	for {
-		d.mu.Lock()
-		c, err := readConf()
-		if err != nil {
-			d.l.Println("Failed to read config:", err)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			d.mu.Lock()
+			c, err := readConf()
+			if err != nil {
+				d.l.Println("Failed to read config:", err)
+				d.mu.Unlock()
+				time.Sleep(time.Second)
+				continue
+			}
+			*d.cfg = c
 			d.mu.Unlock()
-			time.Sleep(time.Second)
-			continue
-		}
-		*d.cfg = c
-		d.mu.Unlock()
 
-		time.Sleep(time.Second)
+			time.Sleep(time.Second)
+		}
 	}
 }

@@ -5,9 +5,8 @@ import (
 	daemonAPI "awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/service"
 	"awesomeProject/internal/service/parser"
-	"awesomeProject/pkg/logger"
+	"context"
 	"log"
-
 	"os"
 	"time"
 
@@ -39,9 +38,10 @@ type model struct {
 	width  int
 	height int
 
-	Service *service.Service
-	Logger  *log.Logger
-	Parser  *parser.Parser
+	DaemonCancel context.CancelFunc
+	Service      *service.Service
+	Logger       *log.Logger
+	Parser       *parser.Parser
 }
 
 var baseStyle = lipgloss.NewStyle().
@@ -62,7 +62,7 @@ func (m model) tick() tea.Cmd {
 	})
 }
 
-func newTable() table.Model {
+func NewTable() table.Model {
 	columns := []table.Column{
 		{Title: "PID", Width: 10},
 		{Title: "Name", Width: 20},
@@ -94,15 +94,7 @@ func newTable() table.Model {
 	return t
 }
 
-func Run(cfg *config.Config, api *daemonAPI.API) error {
-
-	l, err := logger.NewLogger(&cfg.LoggerConfig)
-	if err != nil {
-		return err
-	}
-
-	t := newTable()
-
+func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, t table.Model) error {
 	m := model{
 		table:  t,
 		info:   INFO,
@@ -110,12 +102,14 @@ func Run(cfg *config.Config, api *daemonAPI.API) error {
 		width:  80,
 		height: 20,
 
-		Service: service.New(api),
-		Logger:  l,
-		Parser:  parser.NewParser(),
+		DaemonCancel: daemonCancel,
+		Service:      service.New(api),
+		Logger:       l,
+		Parser:       parser.NewParser(),
 	}
 
-	if _, err := tea.NewProgram(m).Run(); err != nil {
+	app := tea.NewProgram(m)
+	if _, err := app.Run(); err != nil {
 		defer os.Exit(1)
 		return err
 	}

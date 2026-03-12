@@ -6,10 +6,11 @@ import (
 	"awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/tui"
 	"awesomeProject/pkg/logger"
-	"log"
-
+	"context"
 	"fmt"
+	"log"
 	"os"
+	"sync"
 	//"os/signal"
 	//"syscall"
 )
@@ -26,22 +27,32 @@ func main() {
 	cfg := config.NewConfig()
 	apiInstance := info.NewAPI()
 
-	if cfg.Daemon.Run {
-		go func() {
-			l, err := logger.NewDaemonLogger(&cfg.LoggerConfig)
-			if err != nil {
-				panic(err)
-			}
-			d := daemon.New(&cfg.Daemon, l, apiInstance)
+	dl, err := logger.NewDaemonLogger(&cfg.LoggerConfig)
+	if err != nil {
+		panic(err)
+	}
+	d := daemon.New(&cfg.Daemon, dl, apiInstance)
 
-			if err := d.Run(); err != nil {
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+
+	wg := &sync.WaitGroup{}
+
+	if cfg.Daemon.Run {
+		wg.Add(1)
+		go func() {
+			if err := d.Run(ctx); err != nil {
 				log.Fatal(err)
 			}
+			wg.Done()
 		}()
 	}
 
-	err = tui.Run(cfg, apiInstance)
-	if err != nil {
+	l, err := logger.NewLogger(&cfg.LoggerConfig)
+
+	if err = tui.Run(cancel, cfg, l, apiInstance, tui.NewTable()); err != nil {
 		log.Fatal(err)
 	}
+
+	wg.Wait()
 }

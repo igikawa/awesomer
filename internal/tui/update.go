@@ -52,6 +52,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.table.Focus()
 			}
 		case "q", "ctrl+c":
+			m.Logger.Println("Initial graceful shutdown...")
+			m.DaemonCancel()
+			m.Logger.Println("Daemon is now stopped")
 			return m, tea.Quit
 		case "enter":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])

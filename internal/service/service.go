@@ -32,7 +32,7 @@ func New(d *daemonAPI.API) *Service {
 }
 
 func (s *Service) GetProcesses() ([]table.Row, error) {
-	proc, err := s.p.AllProcessess()
+	proc, err := s.p.AllProcesses()
 	if err != nil {
 		return nil, fmt.Errorf("pkg service, GetProcesses: %w", err)
 	}

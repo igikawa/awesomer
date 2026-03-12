@@ -15,6 +15,15 @@ func CreateProcessGroup(groupName string) error {
 	return nil
 }
 
+// DeleteProcessGroup deletes group of process
+func DeleteProcessGroup(groupName string) error {
+	err := os.Remove(fmt.Sprintf("/sys/fs/cgroup/%s", groupName))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove cgroup directory: %v", err)
+	}
+	return nil
+}
+
 // AddProcessToGroup adds service on group
 func AddProcessToGroup(pid int, groupName string) error {
 	if !checkExistGroup(groupName) {
