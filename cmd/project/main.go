@@ -4,7 +4,7 @@ import (
 	"awesomeProject/internal/config"
 	"awesomeProject/internal/daemon"
 	"awesomeProject/internal/daemon/info"
-	"awesomeProject/internal/tui"
+	"awesomeProject/internal/service/tui"
 	"awesomeProject/pkg/logger"
 	"context"
 	"fmt"
@@ -50,7 +50,7 @@ func main() {
 
 	l, err := logger.NewLogger(&cfg.LoggerConfig)
 
-	if err = tui.Run(cancel, cfg, l, apiInstance, tui.NewTable()); err != nil {
+	if err = tui.Run(cancel, cfg, l, apiInstance, tui.NewTable(), tui.NewInfo()); err != nil {
 		log.Fatal(err)
 	}
 

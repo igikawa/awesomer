@@ -3,8 +3,8 @@ package daemon
 import (
 	"awesomeProject/internal/daemon/config"
 	"awesomeProject/internal/daemon/info"
-	"awesomeProject/internal/service/parser"
 	"awesomeProject/pkg/cgroups"
+	"awesomeProject/pkg/parser"
 	"context"
 	"fmt"
 	"log"

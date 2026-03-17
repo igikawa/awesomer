@@ -4,22 +4,25 @@ import (
 	"fmt"
 	"strconv"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
-const HeightSpace = 4
+const HeightSpace = 2
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+	var tableCmd, infoCmd tea.Cmd
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 
-		tableWidth := msg.Width - baseStyle.GetWidth() - HeightSpace
+		tableWidth := msg.Width - baseStyle.GetHorizontalFrameSize() - 55
 		m.table.SetWidth(tableWidth)
 		m.table.SetHeight(msg.Height - HeightSpace)
+
+		m.info.SetWidth(55 - baseStyle.GetHorizontalFrameSize())
+		m.info.SetHeight(msg.Height - HeightSpace - baseStyle.GetVerticalFrameSize())
 
 	// update service list
 	case tickMsg:
@@ -63,7 +66,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			m.info = m.formatedInfo(int32(pid))
+			m.info.SetContent(m.formatedInfo(int32(pid)))
 
 			return m, nil
 		case "h":
@@ -73,7 +76,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			m.info = m.formatedBigInfo(int32(pid))
+			m.info.SetContent(m.formatedBigInfo(int32(pid)))
 
 			return m, nil
 
@@ -87,7 +90,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info = fmt.Sprintf("Killed service:\n\nPID: %d\n\n", pid)
+			m.info.SetContent(fmt.Sprintf("Killed service:\n\nPID: %d\n\n", pid))
 			return m, nil
 		case "d":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
@@ -98,7 +101,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info = fmt.Sprintf("Killed tree of service:\n\nPID: %d\n\n", pid)
+			m.info.SetContent(fmt.Sprintf("Killed tree of service:\n\nPID: %d\n\n", pid))
 			return m, nil
 		case "s":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
@@ -109,7 +112,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info = fmt.Sprintf("Stopped service:\n\nPID: %d\n\n", pid)
+			m.info.SetContent(fmt.Sprintf("Stopped service:\n\nPID: %d\n\n", pid))
 			return m, nil
 		case "r":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
@@ -120,7 +123,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info = fmt.Sprintf("Resumed service:\n\nPID: %d\n\n", pid)
+			m.info.SetContent(fmt.Sprintf("Resumed service:\n\nPID: %d\n\n", pid))
 			return m, nil
 
 		// sort mode manipulation
@@ -139,8 +142,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	m.table, cmd = m.table.Update(msg)
-	return m, cmd
+	m.table, tableCmd = m.table.Update(msg)
+	m.info, infoCmd = m.info.Update(msg)
+	return m, tea.Batch(tableCmd, infoCmd)
 }
 
 func (m model) formatedInfo(pid int32) string {

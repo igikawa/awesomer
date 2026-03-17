@@ -4,15 +4,16 @@ import (
 	"awesomeProject/internal/config"
 	daemonAPI "awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/service"
-	"awesomeProject/internal/service/parser"
+	"awesomeProject/pkg/parser"
 	"context"
 	"log"
 	"os"
 	"time"
 
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 const INFO = "Info\n\n" +
@@ -33,7 +34,7 @@ type dataMsg struct {
 
 type model struct {
 	table  table.Model
-	info   string
+	info   viewport.Model
 	Tick   int
 	width  int
 	height int
@@ -54,6 +55,9 @@ var tableStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
 	BorderForeground(lipgloss.Color("62")).
 	Padding(0, 1)
+
+var activeStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("205"))
+var idleStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
 
 func (m model) tick() tea.Cmd {
 	s := time.Duration(m.Tick) * time.Second
@@ -94,10 +98,17 @@ func NewTable() table.Model {
 	return t
 }
 
-func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, t table.Model) error {
+func NewInfo() viewport.Model {
+	m := viewport.New()
+	m.SetContent(INFO)
+
+	return m
+}
+
+func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, t table.Model, i viewport.Model) error {
 	m := model{
 		table:  t,
-		info:   INFO,
+		info:   i,
 		Tick:   cfg.Tick,
 		width:  80,
 		height: 20,

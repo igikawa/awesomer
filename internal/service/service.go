@@ -2,7 +2,7 @@ package service
 
 import (
 	daemonAPI "awesomeProject/internal/daemon/info"
-	"awesomeProject/internal/service/parser"
+	parser2 "awesomeProject/pkg/parser"
 	"sync"
 
 	"fmt"
@@ -12,11 +12,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/charmbracelet/bubbles/table"
+	"charm.land/bubbles/v2/table"
 )
 
 type Service struct {
-	p           *parser.Parser
+	p           *parser2.Parser
 	mu          *sync.RWMutex
 	daemon      *daemonAPI.API
 	sortProcMod string
@@ -24,7 +24,7 @@ type Service struct {
 
 func New(d *daemonAPI.API) *Service {
 	return &Service{
-		p:           parser.NewParser(),
+		p:           parser2.NewParser(),
 		mu:          &sync.RWMutex{},
 		daemon:      d,
 		sortProcMod: "empty",
@@ -75,8 +75,8 @@ func (s *Service) SetSortProcMod(sortMod string) {
 	s.mu.Unlock()
 }
 
-func (s *Service) sortByCPU(proc []parser.Info) {
-	slices.SortFunc(proc, func(a, b parser.Info) int {
+func (s *Service) sortByCPU(proc []parser2.Info) {
+	slices.SortFunc(proc, func(a, b parser2.Info) int {
 		if a.CPUPercent > b.CPUPercent {
 			return -1
 		} else if a.CPUPercent < b.CPUPercent {
@@ -86,8 +86,8 @@ func (s *Service) sortByCPU(proc []parser.Info) {
 	})
 }
 
-func (s *Service) sortByMem(proc []parser.Info) {
-	slices.SortFunc(proc, func(a, b parser.Info) int {
+func (s *Service) sortByMem(proc []parser2.Info) {
+	slices.SortFunc(proc, func(a, b parser2.Info) int {
 		if a.MemPercent > b.MemPercent {
 			return -1
 		} else if a.MemPercent < b.MemPercent {
@@ -97,8 +97,8 @@ func (s *Service) sortByMem(proc []parser.Info) {
 	})
 }
 
-func (s *Service) sortByThreads(proc []parser.Info) {
-	slices.SortFunc(proc, func(a, b parser.Info) int {
+func (s *Service) sortByThreads(proc []parser2.Info) {
+	slices.SortFunc(proc, func(a, b parser2.Info) int {
 		if a.Threads > b.Threads {
 			return -1
 		} else if a.Threads < b.Threads {
@@ -108,7 +108,7 @@ func (s *Service) sortByThreads(proc []parser.Info) {
 	})
 }
 
-func (s *Service) sortByName(proc []parser.Info) {
+func (s *Service) sortByName(proc []parser2.Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iName := proc[i].Name
 		jName := proc[j].Name
@@ -116,7 +116,7 @@ func (s *Service) sortByName(proc []parser.Info) {
 	})
 }
 
-func (s *Service) sortByUser(proc []parser.Info) {
+func (s *Service) sortByUser(proc []parser2.Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iUser := proc[i].User
 		jUser := proc[j].User
