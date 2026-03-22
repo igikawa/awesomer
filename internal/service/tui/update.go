@@ -10,19 +10,20 @@ import (
 const HeightSpace = 2
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var tableCmd, infoCmd tea.Cmd
+	var cmd tea.Cmd
+	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 
-		tableWidth := msg.Width - baseStyle.GetHorizontalFrameSize() - 55
+		tableWidth := msg.Width - activeStyle.GetHorizontalFrameSize() - 55
 		m.table.SetWidth(tableWidth)
 		m.table.SetHeight(msg.Height - HeightSpace)
 
-		m.info.SetWidth(55 - baseStyle.GetHorizontalFrameSize())
-		m.info.SetHeight(msg.Height - HeightSpace - baseStyle.GetVerticalFrameSize())
+		m.info.SetWidth(55 - activeStyle.GetHorizontalFrameSize())
+		m.info.SetHeight(msg.Height - HeightSpace - activeStyle.GetVerticalFrameSize())
 
 	// update service list
 	case tickMsg:
@@ -59,6 +60,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.DaemonCancel()
 			m.Logger.Println("Daemon is now stopped")
 			return m, tea.Quit
+		case "tab":
+			m.focusTable = !m.focusTable
+			return m, nil
 		case "enter":
 			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
 			if err != nil {
@@ -142,9 +146,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	m.table, tableCmd = m.table.Update(msg)
-	m.info, infoCmd = m.info.Update(msg)
-	return m, tea.Batch(tableCmd, infoCmd)
+	if m.focusTable {
+		m.table, cmd = m.table.Update(msg)
+	} else {
+		m.info, cmd = m.info.Update(msg)
+	}
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
 }
 
 func (m model) formatedInfo(pid int32) string {

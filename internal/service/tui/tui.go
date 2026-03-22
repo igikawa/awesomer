@@ -33,31 +33,18 @@ type dataMsg struct {
 }
 
 type model struct {
-	table  table.Model
-	info   viewport.Model
-	Tick   int
-	width  int
-	height int
+	table      table.Model
+	info       viewport.Model
+	focusTable bool
+	Tick       int
+	width      int
+	height     int
 
 	DaemonCancel context.CancelFunc
 	Service      *service.Service
 	Logger       *log.Logger
 	Parser       *parser.Parser
 }
-
-var baseStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("62")).
-	Padding(1, 2).
-	Width(55)
-
-var tableStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("62")).
-	Padding(0, 1)
-
-var activeStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("205"))
-var idleStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
 
 func (m model) tick() tea.Cmd {
 	s := time.Duration(m.Tick) * time.Second

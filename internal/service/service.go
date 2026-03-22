@@ -3,13 +3,12 @@ package service
 import (
 	daemonAPI "awesomeProject/internal/daemon/info"
 	parser2 "awesomeProject/pkg/parser"
-	"sync"
-
 	"fmt"
 	"os"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 
 	"charm.land/bubbles/v2/table"
