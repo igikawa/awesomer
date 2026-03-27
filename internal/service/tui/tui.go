@@ -61,7 +61,7 @@ func NewTable() table.Model {
 		{Title: "Mem", Width: 7},
 		{Title: "Threads", Width: 7},
 		{Title: "User", Width: 10},
-		{Title: "", Width: 7}, // is controlling with daemon
+		{Title: "", Width: 2}, // is controlling with daemon
 	}
 
 	t := table.New(
@@ -94,11 +94,9 @@ func NewInfo() viewport.Model {
 
 func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, t table.Model, i viewport.Model) error {
 	m := model{
-		table:  t,
-		info:   i,
-		Tick:   cfg.Tick,
-		width:  80,
-		height: 20,
+		table: t,
+		info:  i,
+		Tick:  cfg.Tick,
 
 		DaemonCancel: daemonCancel,
 		Service:      service.New(api),

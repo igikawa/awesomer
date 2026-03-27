@@ -7,7 +7,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const HeightSpace = 2
+const (
+	infoWidth   = 70
+	heightSpace = 2
+	spacing     = 2 // Пробел между таблицей и инфо
+)
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -18,12 +22,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		tableWidth := msg.Width - activeStyle.GetHorizontalFrameSize() - 55
-		m.table.SetWidth(tableWidth)
-		m.table.SetHeight(msg.Height - HeightSpace)
+		vFrame := activeStyle.GetVerticalFrameSize()   // Обычно 2
+		hFrame := activeStyle.GetHorizontalFrameSize() // Обычно 4 (границы + паддинги)
 
-		m.info.SetWidth(55 - activeStyle.GetHorizontalFrameSize())
-		m.info.SetHeight(msg.Height - HeightSpace - activeStyle.GetVerticalFrameSize())
+		// Общая доступная высота для ВСЕГО блока (вместе с рамкой)
+		// Вычитаем 1 или 2, чтобы оставить «воздух» снизу терминала
+		externalHeight := msg.Height - heightSpace
+
+		// Внутренняя высота для компонентов (контент внутри рамок)
+		internalHeight := externalHeight - vFrame
+
+		// 1. Настраиваем Инфо-панель (Viewport)
+		m.info.SetWidth(infoWidth - hFrame)
+		m.info.SetHeight(internalHeight)
+
+		// 2. Настраиваем Таблицу
+		// Ширина таблицы = Окно - Ширина Инфо(55) - Пробел(2)
+		externalTableWidth := msg.Width - infoWidth - spacing
+		m.table.SetWidth(externalTableWidth - hFrame)
+		m.table.SetHeight(internalHeight)
 
 	// update service list
 	case tickMsg:
