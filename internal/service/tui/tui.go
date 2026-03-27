@@ -39,6 +39,10 @@ type model struct {
 	Tick       int
 	width      int
 	height     int
+	tableWidth int
+	infoWidth  int
+	panelH     int
+	infoBodyH  int
 
 	DaemonCancel context.CancelFunc
 	Service      *service.Service
@@ -87,6 +91,14 @@ func NewTable() table.Model {
 
 func NewInfo() viewport.Model {
 	m := viewport.New()
+	m.SoftWrap = true
+	m.FillHeight = true
+	m.LeftGutterFunc = func(info viewport.GutterContext) string {
+		if info.Soft {
+			return "> "
+		}
+		return "  "
+	}
 	m.SetContent(INFO)
 
 	return m
@@ -94,9 +106,10 @@ func NewInfo() viewport.Model {
 
 func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, t table.Model, i viewport.Model) error {
 	m := model{
-		table: t,
-		info:  i,
-		Tick:  cfg.Tick,
+		table:      t,
+		info:       i,
+		focusTable: true,
+		Tick:       cfg.Tick,
 
 		DaemonCancel: daemonCancel,
 		Service:      service.New(api),

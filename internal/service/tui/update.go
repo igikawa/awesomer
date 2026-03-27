@@ -3,15 +3,87 @@ package tui
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
 
 const (
-	infoWidth   = 70
+	infoWidth   = 72
 	heightSpace = 2
-	spacing     = 2 // Пробел между таблицей и инфо
+	spacing     = 1
+	minTableW   = 44
+	minInfoW    = 32
+	infoHeaderH = 1
+	infoFooterH = 1
 )
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (m *model) syncFocus() {
+	if m.focusTable {
+		m.table.Focus()
+		return
+	}
+	m.table.Blur()
+}
+
+func (m *model) syncLayout() {
+	if m.width <= 0 || m.height <= 0 {
+		return
+	}
+
+	vFrame := idleStyle.GetVerticalFrameSize()
+	hFrame := idleStyle.GetHorizontalFrameSize()
+
+	m.panelH = maxInt(m.height-heightSpace, vFrame)
+	totalWidth := maxInt(m.width, 1)
+	m.infoWidth = minInt(infoWidth, maxInt(totalWidth-spacing, 0))
+	m.tableWidth = maxInt(totalWidth-m.infoWidth-spacing, 0)
+
+	if m.tableWidth < minTableW {
+		maxInfoShrink := maxInt(m.infoWidth-minInfoW, 0)
+		requiredShrink := minTableW - m.tableWidth
+		shrink := minInt(requiredShrink, maxInfoShrink)
+		m.infoWidth -= shrink
+		m.tableWidth = maxInt(totalWidth-m.infoWidth-spacing, 0)
+	}
+
+	internalTableWidth := maxInt(m.tableWidth-hFrame, 0)
+	internalTableHeight := maxInt(m.panelH-vFrame, 0)
+	m.table.SetWidth(internalTableWidth)
+	m.table.SetHeight(internalTableHeight)
+
+	bodyHeight := maxInt(m.panelH-vFrame-infoHeaderH-infoFooterH, 1)
+	m.infoBodyH = bodyHeight
+	m.info.SetWidth(maxInt(m.infoWidth-hFrame, 0))
+	m.info.SetHeight(bodyHeight)
+}
+
+func (m *model) setInfoContent(content string) {
+	m.info.SetContent(strings.TrimRight(content, "\n"))
+	m.info.GotoTop()
+}
+
+func (m model) selectedPID() (int, error) {
+	row := m.table.SelectedRow()
+	if len(row) == 0 {
+		return 0, fmt.Errorf("no service selected")
+	}
+	return strconv.Atoi(row[0])
+}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -21,26 +93,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
-		vFrame := activeStyle.GetVerticalFrameSize()   // Обычно 2
-		hFrame := activeStyle.GetHorizontalFrameSize() // Обычно 4 (границы + паддинги)
-
-		// Общая доступная высота для ВСЕГО блока (вместе с рамкой)
-		// Вычитаем 1 или 2, чтобы оставить «воздух» снизу терминала
-		externalHeight := msg.Height - heightSpace
-
-		// Внутренняя высота для компонентов (контент внутри рамок)
-		internalHeight := externalHeight - vFrame
-
-		// 1. Настраиваем Инфо-панель (Viewport)
-		m.info.SetWidth(infoWidth - hFrame)
-		m.info.SetHeight(internalHeight)
-
-		// 2. Настраиваем Таблицу
-		// Ширина таблицы = Окно - Ширина Инфо(55) - Пробел(2)
-		externalTableWidth := msg.Width - infoWidth - spacing
-		m.table.SetWidth(externalTableWidth - hFrame)
-		m.table.SetHeight(internalHeight)
+		m.syncLayout()
+		m.syncFocus()
 
 	// update service list
 	case tickMsg:
@@ -67,11 +121,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			if m.table.Focused() {
-				m.table.Blur()
-			} else {
-				m.table.Focus()
-			}
+			m.focusTable = true
+			m.syncFocus()
+			return m, nil
 		case "q", "ctrl+c":
 			m.Logger.Println("Initial graceful shutdown...")
 			m.DaemonCancel()
@@ -79,72 +131,81 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "tab":
 			m.focusTable = !m.focusTable
+			m.syncFocus()
 			return m, nil
 		case "enter":
-			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
+			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
 				return m, nil
 			}
 
-			m.info.SetContent(m.formatedInfo(int32(pid)))
+			m.setInfoContent(m.formatedInfo(int32(pid)))
+			m.focusTable = false
+			m.syncFocus()
 
 			return m, nil
 		case "h":
-			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
+			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
 				return m, nil
 			}
 
-			m.info.SetContent(m.formatedBigInfo(int32(pid)))
+			m.setInfoContent(m.formatedBigInfo(int32(pid)))
+			m.focusTable = false
+			m.syncFocus()
 
 			return m, nil
 
 		// service manipulation
 		case "k":
-			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
+			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
+				return m, nil
 			}
 			err = m.Service.KillProcess(pid)
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info.SetContent(fmt.Sprintf("Killed service:\n\nPID: %d\n\n", pid))
+			m.setInfoContent(fmt.Sprintf("Killed service\n\nPID: %d", pid))
 			return m, nil
 		case "d":
-			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
+			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
+				return m, nil
 			}
 			err = m.Service.KillProcessTree(pid)
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info.SetContent(fmt.Sprintf("Killed tree of service:\n\nPID: %d\n\n", pid))
+			m.setInfoContent(fmt.Sprintf("Killed service tree\n\nPID: %d", pid))
 			return m, nil
 		case "s":
-			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
+			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
+				return m, nil
 			}
 			err = m.Service.StopProcess(pid)
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info.SetContent(fmt.Sprintf("Stopped service:\n\nPID: %d\n\n", pid))
+			m.setInfoContent(fmt.Sprintf("Stopped service\n\nPID: %d", pid))
 			return m, nil
 		case "r":
-			pid, err := strconv.Atoi(m.table.SelectedRow()[0])
+			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
+				return m, nil
 			}
 			err = m.Service.ResumeProcess(pid)
 			if err != nil {
 				m.Logger.Println(err)
 			}
-			m.info.SetContent(fmt.Sprintf("Resumed service:\n\nPID: %d\n\n", pid))
+			m.setInfoContent(fmt.Sprintf("Resumed service\n\nPID: %d", pid))
 			return m, nil
 
 		// sort mode manipulation
@@ -174,68 +235,71 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) formatedInfo(pid int32) string {
-	var info string
-
 	proc, err := m.Parser.ProcessInfo(pid)
 	if err != nil {
-		info = fmt.Sprintf("Error parsing service info: %s", err)
-		return info
+		return fmt.Sprintf("Error parsing service info: %s", err)
 	}
 
-	info = fmt.Sprintf("Selected service:\n\n"+
-		"PID: %d\n\n"+
-		"Name: %s\n\n"+
-		"CMD: %s\n\n"+
-		"Nice: %d\n\n"+
-		"User: %s\n\n",
-		proc.PID, proc.Name, proc.Cmd, proc.Nice, proc.User)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Selected service\n\n")
+	fmt.Fprintf(&b, "PID: %d\n", proc.PID)
+	fmt.Fprintf(&b, "Name: %s\n", proc.Name)
+	fmt.Fprintf(&b, "User: %s\n", proc.User)
+	fmt.Fprintf(&b, "Nice: %d\n\n", proc.Nice)
+	fmt.Fprintf(&b, "Command\n%s\n", proc.Cmd)
 
-	return info
+	return b.String()
 }
 
 func (m model) formatedBigInfo(pid int32) string {
-	var info string
-
 	proc, err := m.Parser.HardObjectParse(pid)
 	if err != nil {
-		info = fmt.Sprintf("Error parsing service info: %s", err)
-		return info
+		return fmt.Sprintf("Error parsing service info: %s", err)
 	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Extended service details\n\n")
 
 	switch len(proc.Connections) {
 	case 0:
-		info += "\nConnections: nothing\n\n"
+		b.WriteString("Connections\nnone\n\n")
 	default:
-		info += "\nConnections:\n"
+		b.WriteString("Connections\n")
 		for _, conn := range proc.Connections {
-			info += fmt.Sprintf("\tLocal address: %s\n", conn.LocalAddr)
-			info += fmt.Sprintf("\tRemote address: %s\n", conn.RemoteAddr)
-			info += fmt.Sprintf("\tStatus: %s\n\n", conn.Status)
+			fmt.Fprintf(&b, "local:  %s\n", conn.LocalAddr)
+			fmt.Fprintf(&b, "remote: %s\n", conn.RemoteAddr)
+			fmt.Fprintf(&b, "state:  %s\n\n", conn.Status)
 		}
 	}
 
 	switch len(proc.OpenFiles) {
 	case 0:
-		info += "\nOpened files: nothing\n\n"
+		b.WriteString("Opened files\nnone\n\n")
 	default:
-		info += "\nOpened files:\n"
+		b.WriteString("Opened files\n")
 		for _, file := range proc.OpenFiles {
-			info += fmt.Sprintf("\t%s\n", file)
+			fmt.Fprintf(&b, "%s\n", file)
 		}
+		b.WriteString("\n")
 	}
 
 	switch len(proc.Children) {
 	case 0:
-		info += "\nChild service: nothing\n\n"
+		b.WriteString("Child service\nnone\n")
 	default:
-		info += "\nChild service:\n"
+		b.WriteString("Child service\n")
 		_, tree, err := m.Parser.ProcessTree(pid)
 		if err != nil {
-			info += fmt.Sprintf("\nError parsing service tree: %s\n", err)
+			fmt.Fprintf(&b, "Error parsing service tree: %s\n", err)
+			break
 		}
 		s, err := m.Service.GetTuiTree(pid, tree)
-		info += fmt.Sprintf("\n%s\n", s)
+		if err != nil {
+			fmt.Fprintf(&b, "Error building service tree: %s\n", err)
+			break
+		}
+		fmt.Fprintf(&b, "%s\n", s)
 	}
 
-	return info
+	return b.String()
 }
