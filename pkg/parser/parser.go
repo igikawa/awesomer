@@ -5,7 +5,9 @@ import (
 	"runtime"
 	"sync"
 
+	"awesomeProject/pkg/mutation"
 	"github.com/shirou/gopsutil/v4/process"
+	"golang.org/x/sys/unix"
 )
 
 type AbstractionLayer interface {
@@ -62,17 +64,22 @@ func (p *Parser) ProcessInfo(pid int32) (Info, error) {
 	cmd, _ := proc.Cmdline()
 	nice, _ := proc.Nice()
 	user, _ := proc.Username()
+	affinity, _ := mutation.GetCPUaffinity(int(pid))
+	noFileSoft, noFileHard, _ := mutation.GetPRlimit(int(pid), unix.RLIMIT_NOFILE)
 
 	return Info{
-		PPID:       ppid,
-		PID:        pid,
-		Name:       name,
-		CPUPercent: cpu,
-		MemPercent: float64(mem),
-		Threads:    threads,
-		Cmd:        cmd,
-		Nice:       nice,
-		User:       user,
+		PPID:        ppid,
+		PID:         pid,
+		Name:        name,
+		CPUPercent:  cpu,
+		MemPercent:  float64(mem),
+		Threads:     threads,
+		Cmd:         cmd,
+		Nice:        nice,
+		User:        user,
+		CPUAffinity: affinity,
+		NoFileSoft:  noFileSoft,
+		NoFileHard:  noFileHard,
 	}, nil
 }
 

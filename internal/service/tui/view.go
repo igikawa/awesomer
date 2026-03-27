@@ -25,7 +25,9 @@ var panelMetaStyle = lipgloss.NewStyle().
 
 func (m model) infoHeaderView(width int) string {
 	title := "Details"
-	if !m.focusTable {
+	if m.inputMode != inputModeNone {
+		title = "Details [input]"
+	} else if !m.focusTable {
 		title = "Details [scroll]"
 	}
 	return panelTitleStyle.Width(width).Render(title)
@@ -34,7 +36,7 @@ func (m model) infoHeaderView(width int) string {
 func (m model) infoFooterView(width int) string {
 	total := m.info.TotalLineCount()
 	if total == 0 {
-		return panelMetaStyle.Width(width).Render("Tab focus | Enter details | h full")
+		return panelMetaStyle.Width(width).Render("Enter details | h full | A affinity | L limits | J jail")
 	}
 
 	currentTop := minInt(m.info.YOffset()+1, total)
@@ -42,7 +44,9 @@ func (m model) infoFooterView(width int) string {
 	position := fmt.Sprintf("Lines %d-%d/%d", currentTop, currentBottom, total)
 
 	hint := "Up/Down PgUp/PgDn"
-	if m.focusTable {
+	if m.inputMode != inputModeNone {
+		hint = "Enter apply | Esc cancel"
+	} else if m.focusTable {
 		hint = "Tab focus panel"
 	}
 

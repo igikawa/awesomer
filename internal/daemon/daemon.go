@@ -16,10 +16,26 @@ import (
 
 const CgroupName = "processJail"
 
+var (
+	createProcessGroupFn = cgroups.CreateProcessGroup
+	setGroupRowFn        = cgroups.SetGroupRow
+	deleteProcessGroupFn = cgroups.DeleteProcessGroup
+	addProcessToGroupFn  = cgroups.AddProcessToGroup
+	readDaemonConfigFn   = func() (config.Config, error) {
+		var cfg config.Config
+		err := cleanenv.ReadConfig(".env", &cfg)
+		if err != nil {
+			return cfg, err
+		}
+		return cfg, nil
+	}
+	sleepFn = time.Sleep
+)
+
 type Daemon struct {
 	cfg   *config.Config
 	l     *log.Logger
-	parse *parser.Parser
+	parse parser.AbstractionLayer
 	mu    *sync.Mutex
 	api   *info.API
 }
@@ -40,18 +56,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	go d.realTimeReadConfig(ctx)
 
-	err := cgroups.CreateProcessGroup(CgroupName)
+	err := createProcessGroupFn(CgroupName)
 	if err != nil {
 		d.l.Println("Failed to create service group:", err)
 		return err
 	}
 
-	err = cgroups.SetGroupRow(CgroupName, "cpu.max", fmt.Sprintf("%d 100000", int(d.cfg.CPUQuota)*1000))
+	err = setGroupRowFn(CgroupName, "cpu.max", fmt.Sprintf("%d 100000", int(d.cfg.CPUQuota)*1000))
 	if err != nil {
 		d.l.Println("Failed to set CPU quota:", err)
 		return err
 	}
-	err = cgroups.SetGroupRow(CgroupName, "memory.max", fmt.Sprintf("%s", d.cfg.RAMQuota))
+	err = setGroupRowFn(CgroupName, "memory.max", fmt.Sprintf("%s", d.cfg.RAMQuota))
 	if err != nil {
 		d.l.Println("Failed to set memory quota:", err)
 		return err
@@ -62,7 +78,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			err := cgroups.DeleteProcessGroup(CgroupName)
+			err := deleteProcessGroupFn(CgroupName)
 			if err != nil {
 				d.l.Println("Failed to delete service group:", err)
 			}
@@ -98,7 +114,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 					if jail[int(p.PID)] >= 3 {
 						tree, _, _ := d.parse.ProcessTree(p.PID)
 						for _, memberPid := range tree {
-							err := cgroups.AddProcessToGroup(int(memberPid), CgroupName)
+							err := addProcessToGroupFn(int(memberPid), CgroupName)
 							if err != nil {
 								d.l.Printf("error added process %d in jail: %s", memberPid, err.Error())
 								continue
@@ -116,37 +132,29 @@ func (d *Daemon) Run(ctx context.Context) error {
 				}
 			}
 
-			time.Sleep(time.Duration(tick) * time.Second)
+			sleepFn(time.Duration(tick) * time.Second)
 		}
 	}
 }
 
 func (d *Daemon) realTimeReadConfig(ctx context.Context) {
-	var readConf = func() (config.Config, error) {
-		var cfg config.Config
-		err := cleanenv.ReadConfig(".env", &cfg)
-		if err != nil {
-			return cfg, err
-		}
-		return cfg, nil
-	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 			d.mu.Lock()
-			c, err := readConf()
+			c, err := readDaemonConfigFn()
 			if err != nil {
 				d.l.Println("Failed to read config:", err)
 				d.mu.Unlock()
-				time.Sleep(time.Second)
+				sleepFn(time.Second)
 				continue
 			}
 			*d.cfg = c
 			d.mu.Unlock()
 
-			time.Sleep(time.Second)
+			sleepFn(time.Second)
 		}
 	}
 }

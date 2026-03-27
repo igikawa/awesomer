@@ -20,6 +20,9 @@ const INFO = "Info\n\n" +
 	"↑↓ - select service\n\n" +
 	"Enter - show service info\n\n" +
 	"h - show big service info\n\n" +
+	"A - set CPU affinity\n\n" +
+	"L - set RLIMIT_NOFILE\n\n" +
+	"J - toggle process jail\n\n" +
 	"s - stop service\n\n" +
 	"r - resume service\n\n" +
 	"k - kill service\n\n" +
@@ -32,6 +35,14 @@ type dataMsg struct {
 	rows []table.Row
 }
 
+type inputMode int
+
+const (
+	inputModeNone inputMode = iota
+	inputModeAffinity
+	inputModeNoFile
+)
+
 type model struct {
 	table      table.Model
 	info       viewport.Model
@@ -43,6 +54,9 @@ type model struct {
 	infoWidth  int
 	panelH     int
 	infoBodyH  int
+	inputMode  inputMode
+	inputPID   int
+	inputValue string
 
 	DaemonCancel context.CancelFunc
 	Service      *service.Service
@@ -112,7 +126,7 @@ func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api
 		Tick:       cfg.Tick,
 
 		DaemonCancel: daemonCancel,
-		Service:      service.New(api),
+		Service:      service.New(api, &cfg.Daemon),
 		Logger:       l,
 		Parser:       parser.NewParser(),
 	}

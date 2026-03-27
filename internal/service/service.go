@@ -1,7 +1,10 @@
 package service
 
 import (
+	daemonConfig "awesomeProject/internal/daemon/config"
 	daemonAPI "awesomeProject/internal/daemon/info"
+	"awesomeProject/pkg/cgroups"
+	"awesomeProject/pkg/mutation"
 	parser2 "awesomeProject/pkg/parser"
 	"fmt"
 	"os"
@@ -12,20 +15,33 @@ import (
 	"syscall"
 
 	"charm.land/bubbles/v2/table"
+	"golang.org/x/sys/unix"
+)
+
+const processJailGroup = "processJail"
+
+var (
+	setCPUAffinityFn    = mutation.SetCPUaffinity
+	setPRLimitFn        = mutation.SetPRlimit
+	addProcessToGroupFn = cgroups.AddProcessToGroup
+	moveToRootGroupFn   = cgroups.MoveProcessToRootGroup
+	setGroupRowFn       = cgroups.SetGroupRow
 )
 
 type Service struct {
-	p           *parser2.Parser
+	p           parser2.AbstractionLayer
 	mu          *sync.RWMutex
 	daemon      *daemonAPI.API
+	daemonCfg   *daemonConfig.Config
 	sortProcMod string
 }
 
-func New(d *daemonAPI.API) *Service {
+func New(d *daemonAPI.API, daemonCfg *daemonConfig.Config) *Service {
 	return &Service{
 		p:           parser2.NewParser(),
 		mu:          &sync.RWMutex{},
 		daemon:      d,
+		daemonCfg:   daemonCfg,
 		sortProcMod: "empty",
 	}
 }
@@ -214,4 +230,64 @@ func (s *Service) KillProcessTree(pid int) error {
 	}
 
 	return nil
+}
+
+func (s *Service) SetCPUAffinity(pid int, cores []int) error {
+	if len(cores) == 0 {
+		return fmt.Errorf("pkg service, SetCPUAffinity: no CPU cores provided")
+	}
+
+	if err := setCPUAffinityFn(pid, cores); err != nil {
+		return fmt.Errorf("pkg service, SetCPUAffinity: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Service) SetNoFileLimit(pid int, limit uint64) error {
+	if limit == 0 {
+		return fmt.Errorf("pkg service, SetNoFileLimit: limit must be greater than 0")
+	}
+
+	if err := setPRLimitFn(pid, unix.RLIMIT_NOFILE, limit, limit); err != nil {
+		return fmt.Errorf("pkg service, SetNoFileLimit: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Service) ToggleProcessJail(pid int) (bool, error) {
+	tree, _, err := s.p.ProcessTree(int32(pid))
+	if err != nil {
+		return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+	}
+
+	inJail := s.daemon.InJail(pid)
+	if !inJail {
+		if err = setGroupRowFn(processJailGroup, "cpu.max", fmt.Sprintf("%d 100000", int(s.daemonCfg.CPUQuota)*1000)); err != nil {
+			return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+		}
+		if err = setGroupRowFn(processJailGroup, "memory.max", s.daemonCfg.RAMQuota); err != nil {
+			return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+		}
+	}
+
+	for _, memberPID := range tree {
+		targetPID := int(memberPID)
+		if inJail {
+			err = moveToRootGroupFn(targetPID)
+			if err != nil {
+				return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+			}
+			s.daemon.DeleteFromJail(targetPID)
+			continue
+		}
+		err = addProcessToGroupFn(targetPID, processJailGroup)
+		if err != nil {
+			return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+		}
+		s.daemon.SetJail(targetPID)
+	}
+
+	return !inJail, nil
 }
