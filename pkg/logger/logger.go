@@ -6,8 +6,15 @@ import (
 )
 
 type Config struct {
-	LogPath       string `env:"LOG_PATH" env-default:"./awesome.log"`
-	DaemonLogPath string `env:"DAEMON_LOG_PATH" env-default:"./awesome.daemon.log"`
+	LogPath       string `yaml:"log_path"`
+	DaemonLogPath string `yaml:"daemon_log_path"`
+}
+
+func DefaultConfig() Config {
+	return Config{
+		LogPath:       "./awesome.log",
+		DaemonLogPath: "./awesome.daemon.log",
+	}
 }
 
 func NewLogger(cfg *Config) (*log.Logger, error) {

@@ -40,3 +40,15 @@ func (a *API) DeleteFromJail(pid int) {
 
 	delete(a.jail, pid)
 }
+
+func (a *API) PIDs() []int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	out := make([]int, 0, len(a.jail))
+	for pid := range a.jail {
+		out = append(out, pid)
+	}
+
+	return out
+}

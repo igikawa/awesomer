@@ -1,12 +1,23 @@
 package config
 
 type Config struct {
-	Run  bool `env:"DAEMON" env-default:"false"`
-	Tick int  `env:"DAEMON_TICK" env-default:"3"`
+	Run  bool `yaml:"run"`
+	Tick int  `yaml:"tick"`
 
-	CPULimit float64 `env:"DAEMON_CPU_LIMIT" env-default:"85"`
-	RAMLimit float64 `env:"DAEMON_RAM_LIMIT" env-default:"60"`
+	CPULimit float64 `yaml:"cpu_limit"`
+	RAMLimit float64 `yaml:"ram_limit"`
 
-	CPUQuota float64 `env:"DAEMON_CPU_QUOTA" env-default:"20"`
-	RAMQuota string  `env:"DAEMON_RAM_QUOTA" env-default:"8G"`
+	CPUQuota float64 `yaml:"cpu_quota"`
+	RAMQuota string  `yaml:"ram_quota"`
+}
+
+func DefaultConfig() Config {
+	return Config{
+		Run:      false,
+		Tick:     3,
+		CPULimit: 85,
+		RAMLimit: 60,
+		CPUQuota: 20,
+		RAMQuota: "8G",
+	}
 }

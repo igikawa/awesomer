@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	rootConfig "awesomeProject/internal/config"
 	daemonConfig "awesomeProject/internal/daemon/config"
 	"awesomeProject/internal/daemon/info"
 	parser2 "awesomeProject/pkg/parser"
@@ -76,6 +77,7 @@ func TestRunJailsProcessAfterThreeViolationsAndCleansUp(t *testing.T) {
 	origSetRow := setGroupRowFn
 	origDelete := deleteProcessGroupFn
 	origAdd := addProcessToGroupFn
+	origMove := moveToRootGroupFn
 	origSleep := sleepFn
 	origRead := readDaemonConfigFn
 	defer func() {
@@ -83,6 +85,7 @@ func TestRunJailsProcessAfterThreeViolationsAndCleansUp(t *testing.T) {
 		setGroupRowFn = origSetRow
 		deleteProcessGroupFn = origDelete
 		addProcessToGroupFn = origAdd
+		moveToRootGroupFn = origMove
 		sleepFn = origSleep
 		readDaemonConfigFn = origRead
 	}()
@@ -98,6 +101,7 @@ func TestRunJailsProcessAfterThreeViolationsAndCleansUp(t *testing.T) {
 	defer cancel()
 
 	added := make([]int, 0, 2)
+	var moved []int
 	addProcessToGroupFn = func(pid int, groupName string) error {
 		added = append(added, pid)
 		if len(added) >= 2 {
@@ -106,6 +110,10 @@ func TestRunJailsProcessAfterThreeViolationsAndCleansUp(t *testing.T) {
 		return nil
 	}
 
+	moveToRootGroupFn = func(pid int) error {
+		moved = append(moved, pid)
+		return nil
+	}
 	sleepFn = func(d time.Duration) {}
 
 	api := info.NewAPI()
@@ -134,12 +142,15 @@ func TestRunJailsProcessAfterThreeViolationsAndCleansUp(t *testing.T) {
 	if len(added) != 2 {
 		t.Fatalf("added pids = %v, want [200 201]", added)
 	}
-	if !api.InJail(200) || !api.InJail(201) {
-		t.Fatal("expected tree members to be marked jailed")
+	if len(moved) != 2 {
+		t.Fatalf("moved pids = %v, want [200 201]", moved)
+	}
+	if api.InJail(200) || api.InJail(201) {
+		t.Fatal("expected tree members to be removed from jail after stop")
 	}
 }
 
-func TestRealTimeReadConfigReloadsEnvFile(t *testing.T) {
+func TestRealTimeReadConfigReloadsConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	prevWD, err := os.Getwd()
 	if err != nil {
@@ -151,8 +162,8 @@ func TestRealTimeReadConfigReloadsEnvFile(t *testing.T) {
 		t.Fatalf("Chdir() error = %v", err)
 	}
 
-	env := []byte("DAEMON=true\nDAEMON_TICK=9\nDAEMON_CPU_LIMIT=50\nDAEMON_RAM_QUOTA=3G\n")
-	if err := os.WriteFile(filepath.Join(dir, ".env"), env, 0644); err != nil {
+	configYAML := []byte("daemon:\n  run: true\n  tick: 9\n  cpu_limit: 50\n  ram_quota: 3G\n")
+	if err := os.WriteFile(filepath.Join(dir, rootConfig.FileName), configYAML, 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -190,5 +201,77 @@ func TestRealTimeReadConfigReloadsEnvFile(t *testing.T) {
 
 	if !d.cfg.Run || d.cfg.Tick != 9 || d.cfg.CPULimit != 50 || d.cfg.RAMQuota != "3G" {
 		t.Fatalf("cfg not reloaded: %+v", *d.cfg)
+	}
+}
+
+func TestRunStopsWhenConfigTurnsDaemonOff(t *testing.T) {
+	origCreate := createProcessGroupFn
+	origSetRow := setGroupRowFn
+	origDelete := deleteProcessGroupFn
+	origMove := moveToRootGroupFn
+	origSleep := sleepFn
+	origRead := readDaemonConfigFn
+	defer func() {
+		createProcessGroupFn = origCreate
+		setGroupRowFn = origSetRow
+		deleteProcessGroupFn = origDelete
+		moveToRootGroupFn = origMove
+		sleepFn = origSleep
+		readDaemonConfigFn = origRead
+	}()
+
+	createProcessGroupFn = func(groupName string) error { return nil }
+	setGroupRowFn = func(groupName, row, val string) error { return nil }
+
+	deleteCalls := 0
+	deleteProcessGroupFn = func(groupName string) error {
+		deleteCalls++
+		return nil
+	}
+
+	readCalls := 0
+	readDaemonConfigFn = func() (daemonConfig.Config, error) {
+		readCalls++
+		return daemonConfig.Config{Run: false, Tick: 1}, nil
+	}
+
+	var moved []int
+	moveToRootGroupFn = func(pid int) error {
+		moved = append(moved, pid)
+		return nil
+	}
+	sleepFn = func(d time.Duration) {}
+
+	d := &Daemon{
+		cfg: &daemonConfig.Config{
+			Run:      true,
+			Tick:     1,
+			CPULimit: 10,
+			RAMLimit: 10,
+			CPUQuota: 20,
+			RAMQuota: "1G",
+		},
+		l:     log.New(&bytes.Buffer{}, "", 0),
+		parse: &stubParser{},
+		mu:    &sync.Mutex{},
+		api:   info.NewAPI(),
+	}
+	d.api.SetJail(101)
+	d.api.SetJail(202)
+
+	if err := d.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("deleteProcessGroupFn call count = %d, want 1", deleteCalls)
+	}
+	if readCalls != 1 {
+		t.Fatalf("readDaemonConfigFn call count = %d, want 1", readCalls)
+	}
+	if len(moved) != 2 {
+		t.Fatalf("moveToRootGroupFn call count = %d, want 2", len(moved))
+	}
+	if d.cfg.Run {
+		t.Fatal("Daemon config remained enabled after reload")
 	}
 }

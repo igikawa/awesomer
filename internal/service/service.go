@@ -139,6 +139,8 @@ func (s *Service) sortByUser(proc []parser2.Info) {
 	})
 }
 
+// GetTuiTree renders a lightweight ASCII tree so the details panel can show
+// parent-child process relationships without extra UI widgets.
 func (s *Service) GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
 	var sb strings.Builder
 
@@ -256,6 +258,9 @@ func (s *Service) SetNoFileLimit(pid int, limit uint64) error {
 	return nil
 }
 
+// ToggleProcessJail mirrors daemon behaviour for manual actions: configure the
+// jail once on entry, then move either the full tree into processJail or back
+// to the root group.
 func (s *Service) ToggleProcessJail(pid int) (bool, error) {
 	tree, _, err := s.p.ProcessTree(int32(pid))
 	if err != nil {

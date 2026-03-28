@@ -4,7 +4,7 @@ import (
 	"awesomeProject/internal/config"
 	daemonAPI "awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/service"
-	"awesomeProject/pkg/parser"
+	parserpkg "awesomeProject/pkg/parser"
 	"context"
 	"log"
 	"os"
@@ -48,6 +48,7 @@ type model struct {
 	info       viewport.Model
 	focusTable bool
 	Tick       int
+	UI         config.UIConfig
 	width      int
 	height     int
 	tableWidth int
@@ -57,12 +58,54 @@ type model struct {
 	inputMode  inputMode
 	inputPID   int
 	inputValue string
+	styles     uiStyles
 
 	DaemonCancel context.CancelFunc
-	Service      *service.Service
+	Service      serviceAPI
 	Logger       *log.Logger
-	Parser       *parser.Parser
+	Parser       parserAPI
 }
+
+type uiStyles struct {
+	activePanel lipgloss.Style
+	idlePanel   lipgloss.Style
+}
+
+type serviceAPI interface {
+	GetProcesses() ([]table.Row, error)
+	SetSortProcMod(string)
+	GetTuiTree(int32, map[int32][]int32) (string, error)
+	StopProcess(int) error
+	ResumeProcess(int) error
+	KillProcess(int) error
+	KillProcessTree(int) error
+	SetCPUAffinity(int, []int) error
+	SetNoFileLimit(int, uint64) error
+	ToggleProcessJail(int) (bool, error)
+}
+
+type parserAPI interface {
+	ProcessInfo(int32) (parserpkg.Info, error)
+	ProcessTree(int32) ([]int32, map[int32][]int32, error)
+	HardObjectParse(int32) (parserpkg.Info, error)
+}
+
+type program interface {
+	Run() (tea.Model, error)
+}
+
+var (
+	newServiceFn = func(api *daemonAPI.API, cfg *config.Config) serviceAPI {
+		return service.New(api, &cfg.Daemon)
+	}
+	newParserFn = func() parserAPI {
+		return parserpkg.NewParser()
+	}
+	newProgramFn = func(m model) program {
+		return tea.NewProgram(m)
+	}
+	exitFn = os.Exit
+)
 
 func (m model) tick() tea.Cmd {
 	s := time.Duration(m.Tick) * time.Second
@@ -71,7 +114,12 @@ func (m model) tick() tea.Cmd {
 	})
 }
 
-func NewTable() table.Model {
+func NewTable(uiCfg ...config.UIConfig) table.Model {
+	ui := config.DefaultUIConfig()
+	if len(uiCfg) > 0 {
+		ui = mergeUIConfig(uiCfg[0])
+	}
+
 	columns := []table.Column{
 		{Title: "PID", Width: 10},
 		{Title: "Name", Width: 20},
@@ -95,8 +143,8 @@ func NewTable() table.Model {
 		BorderBottom(true).
 		Bold(false)
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
+		Foreground(lipgloss.Color(ui.SelectionTextColor)).
+		Background(lipgloss.Color(ui.SelectionBackgroundColor)).
 		Bold(false)
 	t.SetStyles(s)
 
@@ -119,23 +167,64 @@ func NewInfo() viewport.Model {
 }
 
 func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, t table.Model, i viewport.Model) error {
+	ui := mergeUIConfig(cfg.UI)
 	m := model{
 		table:      t,
 		info:       i,
 		focusTable: true,
 		Tick:       cfg.Tick,
+		UI:         ui,
+		styles:     buildUIStyles(ui),
 
 		DaemonCancel: daemonCancel,
-		Service:      service.New(api, &cfg.Daemon),
+		Service:      newServiceFn(api, cfg),
 		Logger:       l,
-		Parser:       parser.NewParser(),
+		Parser:       newParserFn(),
 	}
 
-	app := tea.NewProgram(m)
+	app := newProgramFn(m)
 	if _, err := app.Run(); err != nil {
-		defer os.Exit(1)
+		defer exitFn(1)
 		return err
 	}
 
 	return nil
+}
+
+func mergeUIConfig(ui config.UIConfig) config.UIConfig {
+	defaults := config.DefaultUIConfig()
+
+	if ui.TableWidth <= 0 {
+		ui.TableWidth = defaults.TableWidth
+	}
+	if ui.InfoWidth <= 0 {
+		ui.InfoWidth = defaults.InfoWidth
+	}
+	if ui.BorderColor == "" {
+		ui.BorderColor = defaults.BorderColor
+	}
+	if ui.ActiveBorderColor == "" {
+		ui.ActiveBorderColor = defaults.ActiveBorderColor
+	}
+	if ui.SelectionTextColor == "" {
+		ui.SelectionTextColor = defaults.SelectionTextColor
+	}
+	if ui.SelectionBackgroundColor == "" {
+		ui.SelectionBackgroundColor = defaults.SelectionBackgroundColor
+	}
+
+	return ui
+}
+
+func buildUIStyles(ui config.UIConfig) uiStyles {
+	return uiStyles{
+		activePanel: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(ui.ActiveBorderColor)).
+			Padding(0, 1),
+		idlePanel: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(ui.BorderColor)).
+			Padding(0, 1),
+	}
 }

@@ -6,6 +6,8 @@ import (
 	parser2 "awesomeProject/pkg/parser"
 	"errors"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -75,6 +77,26 @@ func newTestService(p parser2.AbstractionLayer) *Service {
 	}
 }
 
+func TestNewInitializesServiceDefaults(t *testing.T) {
+	svc := New(daemonAPI.NewAPI(), &daemonConfig.Config{})
+
+	if svc.p == nil {
+		t.Fatal("New() parser is nil")
+	}
+	if svc.mu == nil {
+		t.Fatal("New() mutex is nil")
+	}
+	if svc.daemon == nil {
+		t.Fatal("New() daemon API is nil")
+	}
+	if svc.daemonCfg == nil {
+		t.Fatal("New() daemon config is nil")
+	}
+	if svc.sortProcMod != "empty" {
+		t.Fatalf("sortProcMod = %q, want empty", svc.sortProcMod)
+	}
+}
+
 func TestGetProcessesMarksJailedProcessAndSortsByCPU(t *testing.T) {
 	parser := &stubParser{
 		processes: []parser2.Info{
@@ -99,6 +121,68 @@ func TestGetProcessesMarksJailedProcessAndSortsByCPU(t *testing.T) {
 	}
 	if got := rows[0][6]; got != "*" {
 		t.Fatalf("rows[0] jail marker = %q, want *", got)
+	}
+}
+
+func TestGetProcessesSupportsAllSortModes(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    string
+		wantPID string
+	}{
+		{name: "sort by name", mode: "-n", wantPID: "20"},
+		{name: "sort by mem", mode: "-m", wantPID: "30"},
+		{name: "sort by threads", mode: "-t", wantPID: "30"},
+		{name: "sort by user", mode: "-u", wantPID: "20"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := &stubParser{
+				processes: []parser2.Info{
+					{PID: 10, Name: "bravo", CPUPercent: 1, MemPercent: 5, Threads: 2, User: "zoe"},
+					{PID: 20, Name: "alpha", CPUPercent: 9, MemPercent: 1, Threads: 1, User: "adam"},
+					{PID: 30, Name: "charlie", CPUPercent: 3, MemPercent: 8, Threads: 5, User: "mike"},
+				},
+			}
+			svc := newTestService(parser)
+			svc.mu = &sync.RWMutex{}
+			svc.SetSortProcMod(tt.mode)
+
+			rows, err := svc.GetProcesses()
+			if err != nil {
+				t.Fatalf("GetProcesses() error = %v", err)
+			}
+			if got := rows[0][0]; got != tt.wantPID {
+				t.Fatalf("first PID = %s, want %s", got, tt.wantPID)
+			}
+		})
+	}
+}
+
+func TestGetProcessesPropagatesParserError(t *testing.T) {
+	svc := newTestService(&stubParser{allProcErr: errors.New("boom")})
+
+	if _, err := svc.GetProcesses(); err == nil {
+		t.Fatal("GetProcesses() error = nil, want non-nil")
+	}
+}
+
+func TestGetTuiTreeFormatsTree(t *testing.T) {
+	svc := newTestService(&stubParser{})
+
+	out, err := svc.GetTuiTree(10, map[int32][]int32{
+		10: {20, 30},
+		20: {40},
+	})
+	if err != nil {
+		t.Fatalf("GetTuiTree() error = %v", err)
+	}
+
+	for _, fragment := range []string{"10", "20", "30", "40", "├──", "└──"} {
+		if !strings.Contains(out, fragment) {
+			t.Fatalf("tree output %q does not contain %q", out, fragment)
+		}
 	}
 }
 
@@ -131,6 +215,26 @@ func TestSetCPUAffinityUsesMutationHook(t *testing.T) {
 	}
 }
 
+func TestSetCPUAffinityRejectsEmptyInput(t *testing.T) {
+	svc := newTestService(&stubParser{})
+
+	if err := svc.SetCPUAffinity(42, nil); err == nil {
+		t.Fatal("SetCPUAffinity() error = nil, want non-nil")
+	}
+}
+
+func TestSetCPUAffinityPropagatesMutationError(t *testing.T) {
+	svc := newTestService(&stubParser{})
+
+	orig := setCPUAffinityFn
+	defer func() { setCPUAffinityFn = orig }()
+	setCPUAffinityFn = func(pid int, cores []int) error { return errors.New("boom") }
+
+	if err := svc.SetCPUAffinity(42, []int{1}); err == nil {
+		t.Fatal("SetCPUAffinity() error = nil, want non-nil")
+	}
+}
+
 func TestSetNoFileLimitUsesRlimitNoFile(t *testing.T) {
 	parser := &stubParser{}
 	svc := newTestService(parser)
@@ -158,6 +262,26 @@ func TestSetNoFileLimitUsesRlimitNoFile(t *testing.T) {
 	}
 	if gotPID != 73 || gotLimit != unix.RLIMIT_NOFILE || gotCur != 4096 || gotMax != 4096 {
 		t.Fatalf("SetNoFileLimit() got pid=%d limit=%d cur=%d max=%d", gotPID, gotLimit, gotCur, gotMax)
+	}
+}
+
+func TestSetNoFileLimitRejectsZero(t *testing.T) {
+	svc := newTestService(&stubParser{})
+
+	if err := svc.SetNoFileLimit(73, 0); err == nil {
+		t.Fatal("SetNoFileLimit() error = nil, want non-nil")
+	}
+}
+
+func TestSetNoFileLimitPropagatesMutationError(t *testing.T) {
+	svc := newTestService(&stubParser{})
+
+	orig := setPRLimitFn
+	defer func() { setPRLimitFn = orig }()
+	setPRLimitFn = func(pid int, limit int, cur, max uint64) error { return errors.New("boom") }
+
+	if err := svc.SetNoFileLimit(73, 1024); err == nil {
+		t.Fatal("SetNoFileLimit() error = nil, want non-nil")
 	}
 }
 
@@ -267,6 +391,14 @@ func TestToggleProcessJailPropagatesErrors(t *testing.T) {
 
 	_, err := svc.ToggleProcessJail(1)
 	if err == nil {
+		t.Fatal("ToggleProcessJail() error = nil, want non-nil")
+	}
+}
+
+func TestToggleProcessJailPropagatesProcessTreeError(t *testing.T) {
+	svc := newTestService(&stubParser{processErr: errors.New("tree failed")})
+
+	if _, err := svc.ToggleProcessJail(1); err == nil {
 		t.Fatal("ToggleProcessJail() error = nil, want non-nil")
 	}
 }

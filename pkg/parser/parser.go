@@ -24,6 +24,8 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
+// ProcessTree builds a PPID->children map from the current process snapshot and
+// returns a post-order traversal suitable for bottom-up tree operations.
 func (p *Parser) ProcessTree(pid int32) ([]int32, map[int32][]int32, error) {
 	proc, err := p.AllProcesses()
 	if err != nil {
@@ -83,6 +85,8 @@ func (p *Parser) ProcessInfo(pid int32) (Info, error) {
 	}, nil
 }
 
+// AllProcesses fans out ProcessInfo calls because process inspection is mostly
+// IO-bound and both the daemon and TUI refresh this data frequently.
 func (p *Parser) AllProcesses() ([]Info, error) {
 	proc, err := process.Processes()
 	if err != nil {
@@ -126,6 +130,8 @@ func (p *Parser) AllProcesses() ([]Info, error) {
 	return info, nil
 }
 
+// HardObjectParse gathers slower auxiliary details that are only needed in the
+// expanded details view, keeping the regular refresh path cheaper.
 func (p *Parser) HardObjectParse(pid int32) (Info, error) {
 	proc := process.Process{Pid: pid}
 

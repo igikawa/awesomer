@@ -19,3 +19,15 @@ func TestAPIJailLifecycle(t *testing.T) {
 		t.Fatal("InJail(10) = true, want false after DeleteFromJail")
 	}
 }
+
+func TestAPIPIDsReturnsSnapshot(t *testing.T) {
+	api := NewAPI()
+
+	api.SetJail(10)
+	api.SetJail(20)
+
+	pids := api.PIDs()
+	if len(pids) != 2 {
+		t.Fatalf("len(PIDs()) = %d, want 2", len(pids))
+	}
+}

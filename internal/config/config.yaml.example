@@ -1,0 +1,21 @@
+tick: 1
+
+logger:
+  log_path: ./awesome.log
+  daemon_log_path: ./awesome.daemon.log
+
+daemon:
+  run: true
+  tick: 5
+  cpu_limit: 85
+  ram_limit: 60
+  cpu_quota: 20
+  ram_quota: 8G
+
+ui:
+  table_width: 0
+  info_width: 72
+  border_color: "102"
+  active_border_color: "62"
+  selection_text_color: "229"
+  selection_background_color: "57"

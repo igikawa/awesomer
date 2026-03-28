@@ -8,15 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-var activeStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("62")).
-	Padding(0, 1)
-var idleStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("102")).
-	Padding(0, 1)
-
 var panelTitleStyle = lipgloss.NewStyle().
 	Bold(true)
 
@@ -61,12 +52,12 @@ func (m model) infoFooterView(width int) string {
 }
 
 func (m model) View() tea.View {
-	tStyle := idleStyle
-	iStyle := idleStyle
+	tStyle := m.styles.idlePanel
+	iStyle := m.styles.idlePanel
 	if m.focusTable {
-		tStyle = activeStyle
+		tStyle = m.styles.activePanel
 	} else {
-		iStyle = activeStyle
+		iStyle = m.styles.activePanel
 	}
 
 	infoInnerWidth := maxInt(m.infoWidth-iStyle.GetHorizontalFrameSize(), 0)

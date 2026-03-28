@@ -2,6 +2,7 @@ package parser
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,28 @@ func TestProcessTreeContainsRoot(t *testing.T) {
 	}
 	if rels == nil {
 		t.Fatal("relations map is nil")
+	}
+}
+
+func TestHardObjectParseReturnsStructuredData(t *testing.T) {
+	p := NewParser()
+	info, err := p.HardObjectParse(int32(os.Getpid()))
+	if err != nil {
+		t.Fatalf("HardObjectParse() error = %v", err)
+	}
+	if info.Connections == nil && info.OpenFiles == nil && info.Children == nil {
+		t.Fatal("HardObjectParse() returned no structured data fields")
+	}
+}
+
+func TestHardObjectParseInvalidPidReturnsError(t *testing.T) {
+	p := NewParser()
+
+	_, err := p.HardObjectParse(-1)
+	if err == nil {
+		t.Fatal("HardObjectParse(-1) error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("HardObjectParse(-1) error = %q", err.Error())
 	}
 }

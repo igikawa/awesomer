@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	rootConfig "awesomeProject/internal/config"
 	"awesomeProject/internal/daemon/config"
 	"awesomeProject/internal/daemon/info"
 	"awesomeProject/pkg/cgroups"
@@ -10,24 +11,26 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/ilyakaznacheev/cleanenv"
 )
 
 const CgroupName = "processJail"
+const (
+	violationThreshold = 3
+	ignoredPIDLimit    = 100
+)
 
 var (
 	createProcessGroupFn = cgroups.CreateProcessGroup
 	setGroupRowFn        = cgroups.SetGroupRow
 	deleteProcessGroupFn = cgroups.DeleteProcessGroup
 	addProcessToGroupFn  = cgroups.AddProcessToGroup
+	moveToRootGroupFn    = cgroups.MoveProcessToRootGroup
 	readDaemonConfigFn   = func() (config.Config, error) {
-		var cfg config.Config
-		err := cleanenv.ReadConfig(".env", &cfg)
+		cfg, err := rootConfig.ReadConfig(rootConfig.FileName)
 		if err != nil {
-			return cfg, err
+			return config.Config{}, err
 		}
-		return cfg, nil
+		return cfg.Daemon, nil
 	}
 	sleepFn = time.Sleep
 )
@@ -50,26 +53,17 @@ func New(cfg *config.Config, l *log.Logger, api *info.API) *Daemon {
 	}
 }
 
+// Run keeps per-process violation counters and only jails a process tree after
+// the same PID breaches limits several times in a row.
 func (d *Daemon) Run(ctx context.Context) error {
-	jail := make(map[int]int)
-	mu := &sync.RWMutex{}
+	violations := make(map[int]int)
 
-	go d.realTimeReadConfig(ctx)
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
 
-	err := createProcessGroupFn(CgroupName)
-	if err != nil {
-		d.l.Println("Failed to create service group:", err)
-		return err
-	}
+	go d.realTimeReadConfig(watchCtx)
 
-	err = setGroupRowFn(CgroupName, "cpu.max", fmt.Sprintf("%d 100000", int(d.cfg.CPUQuota)*1000))
-	if err != nil {
-		d.l.Println("Failed to set CPU quota:", err)
-		return err
-	}
-	err = setGroupRowFn(CgroupName, "memory.max", fmt.Sprintf("%s", d.cfg.RAMQuota))
-	if err != nil {
-		d.l.Println("Failed to set memory quota:", err)
+	if err := d.configureGroup(); err != nil {
 		return err
 	}
 
@@ -78,65 +72,28 @@ func (d *Daemon) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			err := deleteProcessGroupFn(CgroupName)
-			if err != nil {
-				d.l.Println("Failed to delete service group:", err)
-			}
-			d.l.Println("Daemon is stopped")
-			return nil
+			return d.stop()
 		default:
-			mu.RLock()
-			cpuLim := d.cfg.CPULimit
-			memLim := d.cfg.RAMLimit
-			tick := d.cfg.Tick
-			isRunning := d.cfg.Run
-			mu.RUnlock()
-
-			if !isRunning {
-				d.l.Println("Daemon is stopped")
-				break
+			cfg := d.snapshotConfig()
+			if !cfg.Run {
+				return d.stop()
 			}
 
 			procs, err := d.parse.AllProcesses()
-
 			if err != nil {
 				d.l.Println(err.Error())
 			}
-			activePIDs := make(map[int]bool)
 
-			for _, p := range procs {
-				activePIDs[int(p.PID)] = true
-				if p.PID < 100 || p.Name == "systemd" || p.Name == "sshd" {
-					continue
-				}
-				if p.CPUPercent > cpuLim || p.MemPercent > memLim {
-					jail[int(p.PID)]++
-					if jail[int(p.PID)] >= 3 {
-						tree, _, _ := d.parse.ProcessTree(p.PID)
-						for _, memberPid := range tree {
-							err := addProcessToGroupFn(int(memberPid), CgroupName)
-							if err != nil {
-								d.l.Printf("error added process %d in jail: %s", memberPid, err.Error())
-								continue
-							}
-							d.api.SetJail(int(memberPid))
-							d.l.Printf("added process %d in jail", memberPid)
-						}
-					}
-				}
-			}
-			for pid := range jail {
-				if !activePIDs[pid] {
-					d.api.DeleteFromJail(pid)
-					delete(jail, pid)
-				}
-			}
+			activePIDs := d.applyLimits(procs, cfg, violations)
+			d.cleanupInactive(violations, activePIDs)
 
-			sleepFn(time.Duration(tick) * time.Second)
+			sleepFn(time.Duration(cfg.Tick) * time.Second)
 		}
 	}
 }
 
+// realTimeReadConfig continuously refreshes daemon settings until the context
+// is cancelled or the updated config explicitly disables daemon mode.
 func (d *Daemon) realTimeReadConfig(ctx context.Context) {
 	for {
 		select {
@@ -154,7 +111,120 @@ func (d *Daemon) realTimeReadConfig(ctx context.Context) {
 			*d.cfg = c
 			d.mu.Unlock()
 
+			if !c.Run {
+				return
+			}
+
 			sleepFn(time.Second)
 		}
 	}
+}
+
+// stop releases jailed processes before removing processJail so the backing
+// cgroup or transient unit can disappear cleanly.
+func (d *Daemon) stop() error {
+	var stopErr error
+
+	for _, pid := range d.api.PIDs() {
+		if err := moveToRootGroupFn(pid); err != nil {
+			d.l.Printf("Failed to move process %d to root group: %v", pid, err)
+			if stopErr == nil {
+				stopErr = err
+			}
+			continue
+		}
+		d.api.DeleteFromJail(pid)
+	}
+
+	if err := deleteProcessGroupFn(CgroupName); err != nil {
+		d.l.Println("Failed to delete service group:", err)
+		if stopErr == nil {
+			stopErr = err
+		}
+	}
+
+	d.l.Println("Daemon is stopped")
+	return stopErr
+}
+
+func (d *Daemon) configureGroup() error {
+	if err := createProcessGroupFn(CgroupName); err != nil {
+		d.l.Println("Failed to create service group:", err)
+		return err
+	}
+
+	cfg := d.snapshotConfig()
+	if err := setGroupRowFn(CgroupName, "cpu.max", fmt.Sprintf("%d 100000", int(cfg.CPUQuota)*1000)); err != nil {
+		d.l.Println("Failed to set CPU quota:", err)
+		return err
+	}
+	if err := setGroupRowFn(CgroupName, "memory.max", cfg.RAMQuota); err != nil {
+		d.l.Println("Failed to set memory quota:", err)
+		return err
+	}
+
+	return nil
+}
+
+func (d *Daemon) snapshotConfig() config.Config {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return *d.cfg
+}
+
+// applyLimits keeps the main loop simple by separating scan, threshold check,
+// and the actual tree migration into processJail.
+func (d *Daemon) applyLimits(procs []parser.Info, cfg config.Config, violations map[int]int) map[int]bool {
+	activePIDs := make(map[int]bool, len(procs))
+
+	for _, p := range procs {
+		pid := int(p.PID)
+		activePIDs[pid] = true
+		if shouldSkipProcess(p) {
+			continue
+		}
+		if p.CPUPercent <= cfg.CPULimit && p.MemPercent <= cfg.RAMLimit {
+			continue
+		}
+
+		violations[pid]++
+		if violations[pid] < violationThreshold {
+			continue
+		}
+
+		d.putTreeInGroup(p.PID)
+	}
+
+	return activePIDs
+}
+
+func (d *Daemon) putTreeInGroup(rootPID int32) {
+	tree, _, err := d.parse.ProcessTree(rootPID)
+	if err != nil {
+		d.l.Printf("error reading process tree for %d: %s", rootPID, err.Error())
+		return
+	}
+
+	for _, memberPID := range tree {
+		if err := addProcessToGroupFn(int(memberPID), CgroupName); err != nil {
+			d.l.Printf("error added process %d in jail: %s", memberPID, err.Error())
+			continue
+		}
+		d.api.SetJail(int(memberPID))
+		d.l.Printf("added process %d in jail", memberPID)
+	}
+}
+
+func (d *Daemon) cleanupInactive(violations map[int]int, activePIDs map[int]bool) {
+	for pid := range violations {
+		if activePIDs[pid] {
+			continue
+		}
+		d.api.DeleteFromJail(pid)
+		delete(violations, pid)
+	}
+}
+
+func shouldSkipProcess(p parser.Info) bool {
+	return p.PID < ignoredPIDLimit || p.Name == "systemd" || p.Name == "sshd"
 }

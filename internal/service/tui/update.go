@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"awesomeProject/internal/config"
 	"fmt"
 	"maps"
 	"slices"
@@ -47,13 +48,12 @@ func (m *model) syncLayout() {
 		return
 	}
 
-	vFrame := idleStyle.GetVerticalFrameSize()
-	hFrame := idleStyle.GetHorizontalFrameSize()
+	vFrame := m.styles.idlePanel.GetVerticalFrameSize()
+	hFrame := m.styles.idlePanel.GetHorizontalFrameSize()
 
 	m.panelH = maxInt(m.height-heightSpace, vFrame)
 	totalWidth := maxInt(m.width, 1)
-	m.infoWidth = minInt(infoWidth, maxInt(totalWidth-spacing, 0))
-	m.tableWidth = maxInt(totalWidth-m.infoWidth-spacing, 0)
+	m.tableWidth, m.infoWidth = resolvePanelWidths(totalWidth, m.UI)
 
 	if m.tableWidth < minTableW {
 		maxInfoShrink := maxInt(m.infoWidth-minInfoW, 0)
@@ -72,6 +72,28 @@ func (m *model) syncLayout() {
 	m.infoBodyH = bodyHeight
 	m.info.SetWidth(maxInt(m.infoWidth-hFrame, 0))
 	m.info.SetHeight(bodyHeight)
+}
+
+// resolvePanelWidths applies preferred widths from config while still clamping
+// both panels to the available terminal width.
+func resolvePanelWidths(totalWidth int, ui config.UIConfig) (int, int) {
+	usableWidth := maxInt(totalWidth-spacing, 0)
+
+	switch {
+	case ui.TableWidth > 0 && ui.InfoWidth > 0:
+		tableWidth := ui.TableWidth
+		infoWidth := ui.InfoWidth
+		if tableWidth+infoWidth <= usableWidth {
+			return tableWidth, infoWidth
+		}
+		return maxInt(usableWidth-infoWidth, 0), minInt(infoWidth, usableWidth)
+	case ui.TableWidth > 0:
+		tableWidth := minInt(ui.TableWidth, usableWidth)
+		return tableWidth, maxInt(usableWidth-tableWidth, 0)
+	default:
+		infoWidth := minInt(ui.InfoWidth, usableWidth)
+		return maxInt(usableWidth-infoWidth, 0), infoWidth
+	}
 }
 
 func (m *model) setInfoContent(content string) {
@@ -127,6 +149,7 @@ func (m *model) renderInputPrompt(message string) {
 		fmt.Fprintf(&b, "PID: %d\n", m.inputPID)
 		b.WriteString("Format: integer value, example: 4096\n")
 		b.WriteString("Press Enter to apply or Esc to cancel.\n\n")
+	default:
 	}
 
 	if message != "" {
@@ -171,42 +194,50 @@ func parseCPUCores(raw string) ([]int, error) {
 func (m *model) submitInput() tea.Cmd {
 	switch m.inputMode {
 	case inputModeAffinity:
-		cores, err := parseCPUCores(m.inputValue)
-		if err != nil {
-			m.renderInputPrompt("Error: " + err.Error())
-			return nil
-		}
-
-		err = m.Service.SetCPUAffinity(m.inputPID, cores)
-		if err != nil {
-			m.renderInputPrompt("Error: " + err.Error())
-			return nil
-		}
-
-		pid := m.inputPID
-		m.clearInput()
-		m.setInfoContent("Updated CPU affinity\n\n" + m.formatedInfo(int32(pid)))
-		return m.refreshRowsCmd()
+		return m.submitAffinityInput()
 	case inputModeNoFile:
-		limit, err := strconv.ParseUint(strings.TrimSpace(m.inputValue), 10, 64)
-		if err != nil {
-			m.renderInputPrompt("Error: invalid limit value")
-			return nil
-		}
-
-		err = m.Service.SetNoFileLimit(m.inputPID, limit)
-		if err != nil {
-			m.renderInputPrompt("Error: " + err.Error())
-			return nil
-		}
-
-		pid := m.inputPID
-		m.clearInput()
-		m.setInfoContent("Updated RLIMIT_NOFILE\n\n" + m.formatedInfo(int32(pid)))
-		return m.refreshRowsCmd()
+		return m.submitNoFileInput()
 	default:
 		return nil
 	}
+}
+
+// submitAffinityInput and submitNoFileInput keep the two interactive form flows
+// separate so validation, mutation, and success rendering stay readable.
+func (m *model) submitAffinityInput() tea.Cmd {
+	cores, err := parseCPUCores(m.inputValue)
+	if err != nil {
+		m.renderInputPrompt("Error: " + err.Error())
+		return nil
+	}
+
+	if err := m.Service.SetCPUAffinity(m.inputPID, cores); err != nil {
+		m.renderInputPrompt("Error: " + err.Error())
+		return nil
+	}
+
+	pid := m.inputPID
+	m.clearInput()
+	m.setInfoContent("Updated CPU affinity\n\n" + m.formatedInfo(int32(pid)))
+	return m.refreshRowsCmd()
+}
+
+func (m *model) submitNoFileInput() tea.Cmd {
+	limit, err := strconv.ParseUint(strings.TrimSpace(m.inputValue), 10, 64)
+	if err != nil {
+		m.renderInputPrompt("Error: invalid limit value")
+		return nil
+	}
+
+	if err := m.Service.SetNoFileLimit(m.inputPID, limit); err != nil {
+		m.renderInputPrompt("Error: " + err.Error())
+		return nil
+	}
+
+	pid := m.inputPID
+	m.clearInput()
+	m.setInfoContent("Updated RLIMIT_NOFILE\n\n" + m.formatedInfo(int32(pid)))
+	return m.refreshRowsCmd()
 }
 
 func intsToCSV(values []int) string {
@@ -394,7 +425,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncFocus()
 
 			return m, nil
-		case "A":
+		case "a":
 			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
@@ -402,7 +433,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.startInput(inputModeAffinity, pid)
 			return m, nil
-		case "L":
+		case "l":
 			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)
@@ -410,7 +441,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.startInput(inputModeNoFile, pid)
 			return m, nil
-		case "J":
+		case "j":
 			pid, err := m.selectedPID()
 			if err != nil {
 				m.Logger.Println(err)

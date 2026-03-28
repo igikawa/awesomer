@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestNewConfigReturnsZeroValuesWhenEnvIsMissing(t *testing.T) {
+func TestNewConfigReturnsZeroValuesWhenConfigFileIsMissing(t *testing.T) {
 	dir := t.TempDir()
 	prevWD, err := os.Getwd()
 	if err != nil {
@@ -32,9 +32,12 @@ func TestNewConfigReturnsZeroValuesWhenEnvIsMissing(t *testing.T) {
 	if cfg.Daemon.Run {
 		t.Fatal("Daemon.Run = true, want false by default")
 	}
+	if cfg.UI.InfoWidth != 0 {
+		t.Fatalf("UI.InfoWidth = %d, want 0", cfg.UI.InfoWidth)
+	}
 }
 
-func TestNewConfigReadsEnvFile(t *testing.T) {
+func TestNewConfigReadsYAMLFile(t *testing.T) {
 	dir := t.TempDir()
 	prevWD, err := os.Getwd()
 	if err != nil {
@@ -46,8 +49,8 @@ func TestNewConfigReadsEnvFile(t *testing.T) {
 		t.Fatalf("Chdir() error = %v", err)
 	}
 
-	env := []byte("TICK=9\nLOG_PATH=/tmp/app.log\nDAEMON=true\nDAEMON_TICK=7\nDAEMON_RAM_QUOTA=2G\n")
-	if err := os.WriteFile(filepath.Join(dir, ".env"), env, 0644); err != nil {
+	configYAML := []byte("tick: 9\nlogger:\n  log_path: /tmp/app.log\ndaemon:\n  run: true\n  tick: 7\n  ram_quota: 2G\nui:\n  table_width: 48\n  border_color: \"240\"\n")
+	if err := os.WriteFile(filepath.Join(dir, FileName), configYAML, 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -67,5 +70,11 @@ func TestNewConfigReadsEnvFile(t *testing.T) {
 	}
 	if cfg.Daemon.RAMQuota != "2G" {
 		t.Fatalf("Daemon.RAMQuota = %q, want 2G", cfg.Daemon.RAMQuota)
+	}
+	if cfg.UI.TableWidth != 48 {
+		t.Fatalf("UI.TableWidth = %d, want 48", cfg.UI.TableWidth)
+	}
+	if cfg.UI.BorderColor != "240" {
+		t.Fatalf("UI.BorderColor = %q, want 240", cfg.UI.BorderColor)
 	}
 }
