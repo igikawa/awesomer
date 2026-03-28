@@ -11,6 +11,9 @@ daemon:
   ram_limit: 60
   cpu_quota: 20
   ram_quota: 8G
+  whitelist:
+    - systemd
+    - sshd
 
 ui:
   table_width: 0

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"awesomeProject/internal/collector"
 	"awesomeProject/internal/config"
 	daemonConfig "awesomeProject/internal/daemon/config"
 	"awesomeProject/internal/daemon/info"
@@ -42,6 +43,7 @@ func TestRunAppStartsDaemonAndTUI(t *testing.T) {
 	origCreate := createConfigFileFn
 	origLoad := loadConfigFn
 	origInfo := newInfoAPIFn
+	origCollector := newCollectorFn
 	origDL := newDaemonLoggerFn
 	origDaemon := newDaemonFn
 	origLogger := newLoggerFn
@@ -52,6 +54,7 @@ func TestRunAppStartsDaemonAndTUI(t *testing.T) {
 		createConfigFileFn = origCreate
 		loadConfigFn = origLoad
 		newInfoAPIFn = origInfo
+		newCollectorFn = origCollector
 		newDaemonLoggerFn = origDL
 		newDaemonFn = origDaemon
 		newLoggerFn = origLogger
@@ -76,6 +79,7 @@ func TestRunAppStartsDaemonAndTUI(t *testing.T) {
 		}
 	}
 	newInfoAPIFn = func() *info.API { return info.NewAPI() }
+	newCollectorFn = func() collector.Provider { return nil }
 	newDaemonLoggerFn = func(cfg *logger.Config) (*log.Logger, error) {
 		return log.New(&bytes.Buffer{}, "", 0), nil
 	}
@@ -84,12 +88,12 @@ func TestRunAppStartsDaemonAndTUI(t *testing.T) {
 	}
 
 	daemonStub := &stubDaemon{}
-	newDaemonFn = func(cfg *daemonConfig.Config, l *log.Logger, api *info.API) daemonRunner {
+	newDaemonFn = func(cfg *daemonConfig.Config, l *log.Logger, api *info.API, snapshots collector.Provider) daemonRunner {
 		return daemonStub
 	}
 
 	tuiCalls := 0
-	runTUIFn = func(cancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *info.API, t table.Model, v viewport.Model) error {
+	runTUIFn = func(cancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *info.API, snapshots collector.Provider, t table.Model, v viewport.Model) error {
 		tuiCalls++
 		cancel()
 		return nil
@@ -114,6 +118,7 @@ func TestRunAppPropagatesTUIError(t *testing.T) {
 	origOpen := openConfigFileFn
 	origLoad := loadConfigFn
 	origInfo := newInfoAPIFn
+	origCollector := newCollectorFn
 	origDL := newDaemonLoggerFn
 	origDaemon := newDaemonFn
 	origLogger := newLoggerFn
@@ -122,6 +127,7 @@ func TestRunAppPropagatesTUIError(t *testing.T) {
 		openConfigFileFn = origOpen
 		loadConfigFn = origLoad
 		newInfoAPIFn = origInfo
+		newCollectorFn = origCollector
 		newDaemonLoggerFn = origDL
 		newDaemonFn = origDaemon
 		newLoggerFn = origLogger
@@ -137,12 +143,13 @@ func TestRunAppPropagatesTUIError(t *testing.T) {
 		return &config.Config{LoggerConfig: logger.Config{LogPath: file.Name(), DaemonLogPath: file.Name()}}
 	}
 	newInfoAPIFn = func() *info.API { return info.NewAPI() }
+	newCollectorFn = func() collector.Provider { return nil }
 	newDaemonLoggerFn = func(cfg *logger.Config) (*log.Logger, error) { return log.New(&bytes.Buffer{}, "", 0), nil }
 	newLoggerFn = func(cfg *logger.Config) (*log.Logger, error) { return log.New(&bytes.Buffer{}, "", 0), nil }
-	newDaemonFn = func(cfg *daemonConfig.Config, l *log.Logger, api *info.API) daemonRunner {
+	newDaemonFn = func(cfg *daemonConfig.Config, l *log.Logger, api *info.API, snapshots collector.Provider) daemonRunner {
 		return &stubDaemon{}
 	}
-	runTUIFn = func(cancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *info.API, t table.Model, v viewport.Model) error {
+	runTUIFn = func(cancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *info.API, snapshots collector.Provider, t table.Model, v viewport.Model) error {
 		return errors.New("tui failed")
 	}
 

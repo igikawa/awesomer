@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"awesomeProject/internal/collector"
 	"awesomeProject/internal/config"
 	daemonAPI "awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/service"
@@ -32,7 +33,8 @@ const INFO = "Info\n\n" +
 type tickMsg time.Time
 
 type dataMsg struct {
-	rows []table.Row
+	rows    []table.Row
+	changed bool
 }
 
 type inputMode int
@@ -72,7 +74,7 @@ type uiStyles struct {
 }
 
 type serviceAPI interface {
-	GetProcesses() ([]table.Row, error)
+	GetProcesses() ([]table.Row, bool, error)
 	SetSortProcMod(string)
 	GetTuiTree(int32, map[int32][]int32) (string, error)
 	StopProcess(int) error
@@ -95,8 +97,8 @@ type program interface {
 }
 
 var (
-	newServiceFn = func(api *daemonAPI.API, cfg *config.Config) serviceAPI {
-		return service.New(api, &cfg.Daemon)
+	newServiceFn = func(api *daemonAPI.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+		return service.New(api, &cfg.Daemon, snapshots)
 	}
 	newParserFn = func() parserAPI {
 		return parserpkg.NewParser()
@@ -108,6 +110,10 @@ var (
 )
 
 func (m model) tick() tea.Cmd {
+	if m.Tick <= 0 {
+		return nil
+	}
+
 	s := time.Duration(m.Tick) * time.Second
 	return tea.Tick(s, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -166,7 +172,7 @@ func NewInfo() viewport.Model {
 	return m
 }
 
-func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, t table.Model, i viewport.Model) error {
+func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, snapshots collector.Provider, t table.Model, i viewport.Model) error {
 	ui := mergeUIConfig(cfg.UI)
 	m := model{
 		table:      t,
@@ -177,7 +183,7 @@ func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api
 		styles:     buildUIStyles(ui),
 
 		DaemonCancel: daemonCancel,
-		Service:      newServiceFn(api, cfg),
+		Service:      newServiceFn(api, cfg, snapshots),
 		Logger:       l,
 		Parser:       newParserFn(),
 	}

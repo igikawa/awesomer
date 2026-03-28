@@ -115,3 +115,15 @@ func TestHardObjectParseInvalidPidReturnsError(t *testing.T) {
 		t.Fatalf("HardObjectParse(-1) error = %q", err.Error())
 	}
 }
+
+func TestProcessInfoWorkerCountIsBounded(t *testing.T) {
+	if got := processInfoWorkerCount(0); got != 1 {
+		t.Fatalf("processInfoWorkerCount(0) = %d, want 1", got)
+	}
+	if got := processInfoWorkerCount(2); got != 2 {
+		t.Fatalf("processInfoWorkerCount(2) = %d, want 2", got)
+	}
+	if got := processInfoWorkerCount(10); got < 1 || got > maxProcessInfoWorkers {
+		t.Fatalf("processInfoWorkerCount(10) = %d, want in [1,%d]", got, maxProcessInfoWorkers)
+	}
+}

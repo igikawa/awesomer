@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"awesomeProject/internal/collector"
 	"awesomeProject/internal/config"
 	daemonConfig "awesomeProject/internal/daemon/config"
 	"awesomeProject/internal/daemon/info"
@@ -26,6 +27,7 @@ func (s stubProgram) Run() (tea.Model, error) {
 
 type stubService struct {
 	rows          []table.Row
+	changed       bool
 	getErr        error
 	affinityErr   error
 	noFileErr     error
@@ -41,8 +43,8 @@ type stubService struct {
 	treeErr       error
 }
 
-func (s *stubService) GetProcesses() ([]table.Row, error) { return s.rows, s.getErr }
-func (s *stubService) SetSortProcMod(mode string)         { s.sortModes = append(s.sortModes, mode) }
+func (s *stubService) GetProcesses() ([]table.Row, bool, error) { return s.rows, s.changed, s.getErr }
+func (s *stubService) SetSortProcMod(mode string)               { s.sortModes = append(s.sortModes, mode) }
 func (s *stubService) GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
 	return s.treeText, s.treeErr
 }
@@ -107,7 +109,7 @@ func newStubModel() model {
 		infoBodyH:    16,
 		styles:       buildUIStyles(ui),
 		DaemonCancel: func() {},
-		Service:      &stubService{rows: []table.Row{{"123", "proc"}}},
+		Service:      &stubService{rows: []table.Row{{"123", "proc"}}, changed: true},
 		Logger:       log.New(&bytes.Buffer{}, "", 0),
 		Parser: &stubParser{
 			info: parserpkg.Info{PID: 123, Name: "proc", User: "user", Cmd: "cmd", CPUAffinity: []int{0, 1}, NoFileSoft: 1024, NoFileHard: 2048},
@@ -133,7 +135,7 @@ func TestRunUsesInjectedProgram(t *testing.T) {
 		exitFn = origExit
 	}()
 
-	newServiceFn = func(api *info.API, cfg *config.Config) serviceAPI {
+	newServiceFn = func(api *info.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
 		return &stubService{}
 	}
 	newParserFn = func() parserAPI { return &stubParser{} }
@@ -150,7 +152,7 @@ func TestRunUsesInjectedProgram(t *testing.T) {
 	exitFn = func(code int) {}
 
 	cfg := &config.Config{Daemon: daemonConfig.Config{}}
-	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), NewTable(cfg.UI), NewInfo()); err != nil {
+	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if !called {
@@ -170,7 +172,9 @@ func TestRunReturnsProgramError(t *testing.T) {
 		exitFn = origExit
 	}()
 
-	newServiceFn = func(api *info.API, cfg *config.Config) serviceAPI { return &stubService{} }
+	newServiceFn = func(api *info.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+		return &stubService{}
+	}
 	newParserFn = func() parserAPI { return &stubParser{} }
 	newProgramFn = func(m model) program {
 		return stubProgram{run: func() (tea.Model, error) { return m, errors.New("boom") }}
@@ -178,7 +182,7 @@ func TestRunReturnsProgramError(t *testing.T) {
 	exitFn = func(code int) {}
 
 	cfg := &config.Config{}
-	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), NewTable(cfg.UI), NewInfo()); err == nil {
+	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err == nil {
 		t.Fatal("Run() error = nil, want non-nil")
 	}
 }
@@ -195,7 +199,9 @@ func TestRunPropagatesCustomUIConfig(t *testing.T) {
 		exitFn = origExit
 	}()
 
-	newServiceFn = func(api *info.API, cfg *config.Config) serviceAPI { return &stubService{} }
+	newServiceFn = func(api *info.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+		return &stubService{}
+	}
 	newParserFn = func() parserAPI { return &stubParser{} }
 	newProgramFn = func(m model) program {
 		return stubProgram{run: func() (tea.Model, error) {
@@ -211,7 +217,7 @@ func TestRunPropagatesCustomUIConfig(t *testing.T) {
 	exitFn = func(code int) {}
 
 	cfg := &config.Config{UI: config.UIConfig{TableWidth: 55, BorderColor: "240"}}
-	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), NewTable(cfg.UI), NewInfo()); err != nil {
+	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 }
@@ -222,6 +228,14 @@ func TestTickProducesTickMsg(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(tickMsg); !ok {
 		t.Fatalf("tick() returned %T, want tickMsg", msg)
+	}
+}
+
+func TestTickReturnsNilWhenDisabled(t *testing.T) {
+	m := newStubModel()
+	m.Tick = 0
+	if cmd := m.tick(); cmd != nil {
+		t.Fatal("tick() cmd != nil for disabled ticker")
 	}
 }
 
@@ -286,6 +300,7 @@ func TestSubmitInputHandlesErrors(t *testing.T) {
 func TestUpdateHandlesTickAndSorting(t *testing.T) {
 	m := newStubModel()
 	svc := m.Service.(*stubService)
+	svc.changed = true
 
 	updated, cmd := m.Update(tickMsg(time.Now()))
 	if cmd == nil {
@@ -308,6 +323,7 @@ func TestUpdateHandlesToggleJailAndQuit(t *testing.T) {
 	m := newStubModel()
 	svc := m.Service.(*stubService)
 	svc.jailState = true
+	svc.changed = true
 	cancelled := false
 	m.DaemonCancel = func() { cancelled = true }
 
@@ -328,6 +344,31 @@ func TestUpdateHandlesToggleJailAndQuit(t *testing.T) {
 	}
 	if !cancelled {
 		t.Fatal("DaemonCancel was not called")
+	}
+}
+
+func TestUpdateSkipsTableRefreshWhenRowsUnchanged(t *testing.T) {
+	m := newStubModel()
+	svc := m.Service.(*stubService)
+	svc.rows = []table.Row{{"123", "proc"}}
+	svc.changed = false
+
+	updated, cmd := m.Update(tickMsg(time.Now()))
+	if cmd == nil {
+		t.Fatal("Update(tickMsg) cmd = nil")
+	}
+
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("tick batch returned nil")
+	}
+
+	m2 := updated.(model)
+	before := m2.table.Rows()
+	updated, _ = m2.Update(msg)
+	after := updated.(model).table.Rows()
+	if len(before) != len(after) {
+		t.Fatalf("row count changed from %d to %d", len(before), len(after))
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"awesomeProject/internal/collector"
 	"awesomeProject/internal/config"
 	"awesomeProject/internal/daemon"
 	daemonConfig "awesomeProject/internal/daemon/config"
@@ -22,8 +23,9 @@ var (
 	loadConfigFn       = config.NewConfig
 	newInfoAPIFn       = info.NewAPI
 	newDaemonLoggerFn  = logger.NewDaemonLogger
-	newDaemonFn        = func(cfg *daemonConfig.Config, l *log.Logger, api *info.API) daemonRunner {
-		return daemon.New(cfg, l, api)
+	newCollectorFn     = func() collector.Provider { return collector.New() }
+	newDaemonFn        = func(cfg *daemonConfig.Config, l *log.Logger, api *info.API, snapshots collector.Provider) daemonRunner {
+		return daemon.New(cfg, l, api, snapshots)
 	}
 	newLoggerFn = logger.NewLogger
 	runTUIFn    = tui.Run
@@ -45,12 +47,13 @@ func runApp() error {
 
 	cfg := loadConfigFn()
 	apiInstance := newInfoAPIFn()
+	snapshots := newCollectorFn()
 
 	dl, err := newDaemonLoggerFn(&cfg.LoggerConfig)
 	if err != nil {
 		return err
 	}
-	d := newDaemonFn(&cfg.Daemon, dl, apiInstance)
+	d := newDaemonFn(&cfg.Daemon, dl, apiInstance, snapshots)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := &sync.WaitGroup{}
@@ -61,7 +64,7 @@ func runApp() error {
 		return err
 	}
 
-	if err = runTUIFn(cancel, cfg, l, apiInstance, tui.NewTable(cfg.UI), tui.NewInfo()); err != nil {
+	if err = runTUIFn(cancel, cfg, l, apiInstance, snapshots, tui.NewTable(cfg.UI), tui.NewInfo()); err != nil {
 		return err
 	}
 

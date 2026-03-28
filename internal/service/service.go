@@ -1,11 +1,12 @@
 package service
 
 import (
+	"awesomeProject/internal/collector"
 	daemonConfig "awesomeProject/internal/daemon/config"
 	daemonAPI "awesomeProject/internal/daemon/info"
 	"awesomeProject/pkg/cgroups"
 	"awesomeProject/pkg/mutation"
-	parser2 "awesomeProject/pkg/parser"
+	parser "awesomeProject/pkg/parser"
 	"fmt"
 	"os"
 	"slices"
@@ -29,16 +30,33 @@ var (
 )
 
 type Service struct {
-	p           parser2.AbstractionLayer
+	snapshots   collector.Provider
 	mu          *sync.RWMutex
 	daemon      *daemonAPI.API
 	daemonCfg   *daemonConfig.Config
 	sortProcMod string
+	lastSortMod string
+	lastStates  []rowState
+	lastRows    []table.Row
 }
 
-func New(d *daemonAPI.API, daemonCfg *daemonConfig.Config) *Service {
+type rowState struct {
+	PID     int32
+	Name    string
+	CPU     float64
+	Mem     float64
+	Threads int32
+	User    string
+	InJail  bool
+}
+
+func New(d *daemonAPI.API, daemonCfg *daemonConfig.Config, snapshots collector.Provider) *Service {
+	if snapshots == nil {
+		snapshots = collector.New()
+	}
+
 	return &Service{
-		p:           parser2.NewParser(),
+		snapshots:   snapshots,
 		mu:          &sync.RWMutex{},
 		daemon:      d,
 		daemonCfg:   daemonCfg,
@@ -46,13 +64,14 @@ func New(d *daemonAPI.API, daemonCfg *daemonConfig.Config) *Service {
 	}
 }
 
-func (s *Service) GetProcesses() ([]table.Row, error) {
-	proc, err := s.p.AllProcesses()
+func (s *Service) GetProcesses() ([]table.Row, bool, error) {
+	proc, err := s.snapshots.Processes()
 	if err != nil {
-		return nil, fmt.Errorf("pkg service, GetProcesses: %w", err)
+		return nil, false, fmt.Errorf("pkg service, GetProcesses: %w", err)
 	}
 
-	switch s.sortProcMod {
+	sortMode := s.currentSortMode()
+	switch sortMode {
 	case "-n":
 		s.sortByName(proc)
 	case "-c":
@@ -65,23 +84,42 @@ func (s *Service) GetProcesses() ([]table.Row, error) {
 		s.sortByUser(proc)
 	}
 
-	var info []table.Row
+	states := make([]rowState, 0, len(proc))
 	for _, p := range proc {
-		var out string
-		if isControlling := s.daemon.InJail(int(p.PID)); isControlling {
-			out = "*"
-		}
-		info = append(info, table.Row{
-			fmt.Sprintf("%d", p.PID),
-			fmt.Sprintf("%s", p.Name),
-			fmt.Sprintf("%.2f %%", p.CPUPercent),
-			fmt.Sprintf("%.2f %%", p.MemPercent),
-			fmt.Sprintf("%d", p.Threads),
-			fmt.Sprintf("%s", p.User),
-			fmt.Sprintf("%s", out),
+		states = append(states, rowState{
+			PID:     p.PID,
+			Name:    p.Name,
+			CPU:     p.CPUPercent,
+			Mem:     p.MemPercent,
+			Threads: p.Threads,
+			User:    p.User,
+			InJail:  s.daemon.InJail(int(p.PID)),
 		})
 	}
-	return info, nil
+
+	if rows, ok := s.cachedRows(sortMode, states); ok {
+		return rows, false, nil
+	}
+
+	rows := make([]table.Row, 0, len(states))
+	for _, state := range states {
+		out := ""
+		if state.InJail {
+			out = "*"
+		}
+		rows = append(rows, table.Row{
+			fmt.Sprintf("%d", state.PID),
+			state.Name,
+			fmt.Sprintf("%.2f %%", state.CPU),
+			fmt.Sprintf("%.2f %%", state.Mem),
+			fmt.Sprintf("%d", state.Threads),
+			state.User,
+			out,
+		})
+	}
+
+	s.storeRows(sortMode, states, rows)
+	return cloneRows(rows), true, nil
 }
 
 func (s *Service) SetSortProcMod(sortMod string) {
@@ -90,8 +128,42 @@ func (s *Service) SetSortProcMod(sortMod string) {
 	s.mu.Unlock()
 }
 
-func (s *Service) sortByCPU(proc []parser2.Info) {
-	slices.SortFunc(proc, func(a, b parser2.Info) int {
+func (s *Service) currentSortMode() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sortProcMod
+}
+
+func (s *Service) cachedRows(sortMode string, states []rowState) ([]table.Row, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortMode != s.lastSortMod || !slices.Equal(states, s.lastStates) {
+		return nil, false
+	}
+
+	return cloneRows(s.lastRows), true
+}
+
+func (s *Service) storeRows(sortMode string, states []rowState, rows []table.Row) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.lastSortMod = sortMode
+	s.lastStates = slices.Clone(states)
+	s.lastRows = cloneRows(rows)
+}
+
+func cloneRows(rows []table.Row) []table.Row {
+	cloned := make([]table.Row, len(rows))
+	for i := range rows {
+		cloned[i] = slices.Clone(rows[i])
+	}
+	return cloned
+}
+
+func (s *Service) sortByCPU(proc []parser.Info) {
+	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.CPUPercent > b.CPUPercent {
 			return -1
 		} else if a.CPUPercent < b.CPUPercent {
@@ -101,8 +173,8 @@ func (s *Service) sortByCPU(proc []parser2.Info) {
 	})
 }
 
-func (s *Service) sortByMem(proc []parser2.Info) {
-	slices.SortFunc(proc, func(a, b parser2.Info) int {
+func (s *Service) sortByMem(proc []parser.Info) {
+	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.MemPercent > b.MemPercent {
 			return -1
 		} else if a.MemPercent < b.MemPercent {
@@ -112,8 +184,8 @@ func (s *Service) sortByMem(proc []parser2.Info) {
 	})
 }
 
-func (s *Service) sortByThreads(proc []parser2.Info) {
-	slices.SortFunc(proc, func(a, b parser2.Info) int {
+func (s *Service) sortByThreads(proc []parser.Info) {
+	slices.SortFunc(proc, func(a, b parser.Info) int {
 		if a.Threads > b.Threads {
 			return -1
 		} else if a.Threads < b.Threads {
@@ -123,7 +195,7 @@ func (s *Service) sortByThreads(proc []parser2.Info) {
 	})
 }
 
-func (s *Service) sortByName(proc []parser2.Info) {
+func (s *Service) sortByName(proc []parser.Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iName := proc[i].Name
 		jName := proc[j].Name
@@ -131,7 +203,7 @@ func (s *Service) sortByName(proc []parser2.Info) {
 	})
 }
 
-func (s *Service) sortByUser(proc []parser2.Info) {
+func (s *Service) sortByUser(proc []parser.Info) {
 	sort.Slice(proc, func(i, j int) bool {
 		iUser := proc[i].User
 		jUser := proc[j].User
@@ -215,7 +287,7 @@ func (s *Service) KillProcess(pid int) error {
 }
 
 func (s *Service) KillProcessTree(pid int) error {
-	tree, _, err := s.p.ProcessTree(int32(pid))
+	tree, _, err := s.snapshots.ProcessTree(int32(pid))
 	if err != nil {
 		return fmt.Errorf("pkg service, KillProcessTree: %w", err)
 	}
@@ -262,7 +334,7 @@ func (s *Service) SetNoFileLimit(pid int, limit uint64) error {
 // jail once on entry, then move either the full tree into processJail or back
 // to the root group.
 func (s *Service) ToggleProcessJail(pid int) (bool, error) {
-	tree, _, err := s.p.ProcessTree(int32(pid))
+	tree, _, err := s.snapshots.ProcessTree(int32(pid))
 	if err != nil {
 		return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
 	}

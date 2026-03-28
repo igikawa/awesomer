@@ -5,7 +5,5 @@ import (
 )
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
-		m.tick(),
-	)
+	return m.tick()
 }

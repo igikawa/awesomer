@@ -49,7 +49,7 @@ func TestNewConfigReadsYAMLFile(t *testing.T) {
 		t.Fatalf("Chdir() error = %v", err)
 	}
 
-	configYAML := []byte("tick: 9\nlogger:\n  log_path: /tmp/app.log\ndaemon:\n  run: true\n  tick: 7\n  ram_quota: 2G\nui:\n  table_width: 48\n  border_color: \"240\"\n")
+	configYAML := []byte("tick: 9\nlogger:\n  log_path: /tmp/app.log\ndaemon:\n  run: true\n  tick: 7\n  ram_quota: 2G\n  whitelist:\n    - systemd\n    - dockerd\nui:\n  table_width: 48\n  border_color: \"240\"\n")
 	if err := os.WriteFile(filepath.Join(dir, FileName), configYAML, 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -70,6 +70,9 @@ func TestNewConfigReadsYAMLFile(t *testing.T) {
 	}
 	if cfg.Daemon.RAMQuota != "2G" {
 		t.Fatalf("Daemon.RAMQuota = %q, want 2G", cfg.Daemon.RAMQuota)
+	}
+	if len(cfg.Daemon.Whitelist) != 2 || cfg.Daemon.Whitelist[1] != "dockerd" {
+		t.Fatalf("Daemon.Whitelist = %v, want [systemd dockerd]", cfg.Daemon.Whitelist)
 	}
 	if cfg.UI.TableWidth != 48 {
 		t.Fatalf("UI.TableWidth = %d, want 48", cfg.UI.TableWidth)

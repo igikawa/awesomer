@@ -32,6 +32,10 @@ func (s *stubParser) AllProcesses() ([]parser2.Info, error) {
 	return slices.Clone(s.processes), nil
 }
 
+func (s *stubParser) Processes() ([]parser2.Info, error) {
+	return s.AllProcesses()
+}
+
 func (s *stubParser) ProcessInfo(pid int32) (parser2.Info, error) {
 	s.processIDHit = pid
 	if s.processErr != nil {
@@ -68,20 +72,20 @@ func mapsClone(in map[int32][]int32) map[int32][]int32 {
 	return out
 }
 
-func newTestService(p parser2.AbstractionLayer) *Service {
+func newTestService(p *stubParser) *Service {
 	return &Service{
-		p:         p,
-		mu:        nil,
+		snapshots: p,
+		mu:        &sync.RWMutex{},
 		daemon:    daemonAPI.NewAPI(),
 		daemonCfg: &daemonConfig.Config{CPUQuota: 25, RAMQuota: "512M"},
 	}
 }
 
 func TestNewInitializesServiceDefaults(t *testing.T) {
-	svc := New(daemonAPI.NewAPI(), &daemonConfig.Config{})
+	svc := New(daemonAPI.NewAPI(), &daemonConfig.Config{}, &stubParser{})
 
-	if svc.p == nil {
-		t.Fatal("New() parser is nil")
+	if svc.snapshots == nil {
+		t.Fatal("New() snapshots is nil")
 	}
 	if svc.mu == nil {
 		t.Fatal("New() mutex is nil")
@@ -108,9 +112,12 @@ func TestGetProcessesMarksJailedProcessAndSortsByCPU(t *testing.T) {
 	svc.daemon.SetJail(20)
 	svc.sortProcMod = "-c"
 
-	rows, err := svc.GetProcesses()
+	rows, changed, err := svc.GetProcesses()
 	if err != nil {
 		t.Fatalf("GetProcesses() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("GetProcesses() changed = false, want true on first render")
 	}
 
 	if len(rows) != 2 {
@@ -149,9 +156,12 @@ func TestGetProcessesSupportsAllSortModes(t *testing.T) {
 			svc.mu = &sync.RWMutex{}
 			svc.SetSortProcMod(tt.mode)
 
-			rows, err := svc.GetProcesses()
+			rows, changed, err := svc.GetProcesses()
 			if err != nil {
 				t.Fatalf("GetProcesses() error = %v", err)
+			}
+			if !changed {
+				t.Fatal("GetProcesses() changed = false, want true after sort change")
 			}
 			if got := rows[0][0]; got != tt.wantPID {
 				t.Fatalf("first PID = %s, want %s", got, tt.wantPID)
@@ -163,8 +173,38 @@ func TestGetProcessesSupportsAllSortModes(t *testing.T) {
 func TestGetProcessesPropagatesParserError(t *testing.T) {
 	svc := newTestService(&stubParser{allProcErr: errors.New("boom")})
 
-	if _, err := svc.GetProcesses(); err == nil {
+	if _, _, err := svc.GetProcesses(); err == nil {
 		t.Fatal("GetProcesses() error = nil, want non-nil")
+	}
+}
+
+func TestGetProcessesReturnsCachedRowsWhenSnapshotIsUnchanged(t *testing.T) {
+	parser := &stubParser{
+		processes: []parser2.Info{
+			{PID: 10, Name: "same", CPUPercent: 1, MemPercent: 5, Threads: 2, User: "alice"},
+		},
+	}
+	svc := newTestService(parser)
+
+	first, changed, err := svc.GetProcesses()
+	if err != nil {
+		t.Fatalf("first GetProcesses() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("first GetProcesses() changed = false, want true")
+	}
+
+	second, changed, err := svc.GetProcesses()
+	if err != nil {
+		t.Fatalf("second GetProcesses() error = %v", err)
+	}
+	if changed {
+		t.Fatal("second GetProcesses() changed = true, want false")
+	}
+
+	first[0][1] = "mutated"
+	if second[0][1] != "same" {
+		t.Fatalf("cached row name = %q, want same", second[0][1])
 	}
 }
 

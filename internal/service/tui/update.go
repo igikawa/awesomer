@@ -103,12 +103,12 @@ func (m *model) setInfoContent(content string) {
 
 func (m model) refreshRowsCmd() tea.Cmd {
 	return func() tea.Msg {
-		rows, err := m.Service.GetProcesses()
+		rows, changed, err := m.Service.GetProcesses()
 		if err != nil {
 			m.Logger.Println(err)
 			return nil
 		}
-		return dataMsg{rows: rows}
+		return dataMsg{rows: rows, changed: changed}
 	}
 }
 
@@ -344,18 +344,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			m.tick(),
 			func() tea.Msg {
-				rows, err := m.Service.GetProcesses()
+				rows, changed, err := m.Service.GetProcesses()
 				if err != nil {
 					m.Logger.Println(err)
 					return nil
 				}
-				return dataMsg{rows: rows}
+				return dataMsg{rows: rows, changed: changed}
 			},
 		)
 
 	// set new service list
 	case dataMsg:
-		m.table.SetRows(msg.rows)
+		if msg.changed {
+			m.table.SetRows(msg.rows)
+		}
 
 	// keyboard shortcuts
 	case tea.KeyMsg:

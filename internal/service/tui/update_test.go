@@ -230,6 +230,7 @@ func TestFormatedInfoIncludesCurrentProcess(t *testing.T) {
 		Service: service.New(
 			info.NewAPI(),
 			&daemonConfig.Config{},
+			nil,
 		),
 	}
 
@@ -250,6 +251,7 @@ func TestFormatedBigInfoIncludesSections(t *testing.T) {
 		Service: service.New(
 			info.NewAPI(),
 			&daemonConfig.Config{},
+			nil,
 		),
 	}
 

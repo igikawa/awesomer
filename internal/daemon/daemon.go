@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"awesomeProject/internal/collector"
 	rootConfig "awesomeProject/internal/config"
 	"awesomeProject/internal/daemon/config"
 	"awesomeProject/internal/daemon/info"
@@ -9,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,20 +38,24 @@ var (
 )
 
 type Daemon struct {
-	cfg   *config.Config
-	l     *log.Logger
-	parse parser.AbstractionLayer
-	mu    *sync.Mutex
-	api   *info.API
+	cfg       *config.Config
+	l         *log.Logger
+	snapshots collector.Provider
+	mu        *sync.Mutex
+	api       *info.API
 }
 
-func New(cfg *config.Config, l *log.Logger, api *info.API) *Daemon {
+func New(cfg *config.Config, l *log.Logger, api *info.API, snapshots collector.Provider) *Daemon {
+	if snapshots == nil {
+		snapshots = collector.New()
+	}
+
 	return &Daemon{
-		cfg:   cfg,
-		l:     l,
-		parse: parser.NewParser(),
-		mu:    &sync.Mutex{},
-		api:   api,
+		cfg:       cfg,
+		l:         l,
+		snapshots: snapshots,
+		mu:        &sync.Mutex{},
+		api:       api,
 	}
 }
 
@@ -79,7 +85,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 				return d.stop()
 			}
 
-			procs, err := d.parse.AllProcesses()
+			procs, err := d.snapshots.Processes()
 			if err != nil {
 				d.l.Println(err.Error())
 			}
@@ -176,11 +182,15 @@ func (d *Daemon) snapshotConfig() config.Config {
 // and the actual tree migration into processJail.
 func (d *Daemon) applyLimits(procs []parser.Info, cfg config.Config, violations map[int]int) map[int]bool {
 	activePIDs := make(map[int]bool, len(procs))
+	whitelist := newWhitelistSet(cfg.Whitelist)
 
 	for _, p := range procs {
 		pid := int(p.PID)
 		activePIDs[pid] = true
-		if shouldSkipProcess(p) {
+		if shouldSkipProcess(p, whitelist) {
+			continue
+		}
+		if d.api.InJail(pid) {
 			continue
 		}
 		if p.CPUPercent <= cfg.CPULimit && p.MemPercent <= cfg.RAMLimit {
@@ -199,7 +209,7 @@ func (d *Daemon) applyLimits(procs []parser.Info, cfg config.Config, violations 
 }
 
 func (d *Daemon) putTreeInGroup(rootPID int32) {
-	tree, _, err := d.parse.ProcessTree(rootPID)
+	tree, _, err := d.snapshots.ProcessTree(rootPID)
 	if err != nil {
 		d.l.Printf("error reading process tree for %d: %s", rootPID, err.Error())
 		return
@@ -225,6 +235,29 @@ func (d *Daemon) cleanupInactive(violations map[int]int, activePIDs map[int]bool
 	}
 }
 
-func shouldSkipProcess(p parser.Info) bool {
-	return p.PID < ignoredPIDLimit || p.Name == "systemd" || p.Name == "sshd"
+func newWhitelistSet(items []string) map[string]struct{} {
+	whitelist := make(map[string]struct{}, len(items))
+
+	for _, item := range items {
+		name := normalizeProcessName(item)
+		if name == "" {
+			continue
+		}
+		whitelist[name] = struct{}{}
+	}
+
+	return whitelist
+}
+
+func shouldSkipProcess(p parser.Info, whitelist map[string]struct{}) bool {
+	if p.PID < ignoredPIDLimit {
+		return true
+	}
+
+	_, found := whitelist[normalizeProcessName(p.Name)]
+	return found
+}
+
+func normalizeProcessName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }

@@ -1,6 +1,7 @@
 # Awesomer
 
 Russian version: [ru_README.md](./ru_README.md)
+Developer guide: [docs/developer.md](./docs/developer.md)
 
 `Awesomer` is a Linux terminal utility for process monitoring and control. It shows a live process list, lets you inspect detailed information for the selected process, and can run a background daemon that automatically moves heavy processes into a constrained resource group. If the target system uses `systemd`, limits are managed through a transient unit; otherwise the application falls back to direct `cgroup v2` usage.
 
@@ -130,6 +131,9 @@ daemon:
   ram_limit: 60
   cpu_quota: 20
   ram_quota: 8G
+  whitelist:
+    - systemd
+    - sshd
 
 ui:
   table_width: 0
@@ -171,6 +175,10 @@ ui:
   - Mapped to `MemoryMax` when `systemd` is used.
   - Written to `memory.max` for direct `cgroup v2`.
   - Default: `8G`
+- `daemon.whitelist`: process names that the daemon must never move into the constrained group.
+  - Matching is case-insensitive and based on the process name shown in the table.
+  - Intended for critical services that an administrator wants to protect from automatic limiting.
+  - Default: `["systemd", "sshd"]`
 
 The daemon hot-reloads `config.yaml`, so configuration changes are applied without restarting the application.
 

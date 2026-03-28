@@ -23,4 +23,10 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.RAMQuota != "8G" {
 		t.Fatalf("RAMQuota = %q, want 8G", cfg.RAMQuota)
 	}
+	if len(cfg.Whitelist) != 2 {
+		t.Fatalf("len(Whitelist) = %d, want 2", len(cfg.Whitelist))
+	}
+	if cfg.Whitelist[0] != "systemd" || cfg.Whitelist[1] != "sshd" {
+		t.Fatalf("Whitelist = %v, want [systemd sshd]", cfg.Whitelist)
+	}
 }

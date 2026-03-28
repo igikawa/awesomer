@@ -20,6 +20,8 @@ type AbstractionLayer interface {
 // Parser is implementing AbstractionLayer
 type Parser struct{}
 
+const maxProcessInfoWorkers = 8
+
 func NewParser() *Parser {
 	return &Parser{}
 }
@@ -93,11 +95,11 @@ func (p *Parser) AllProcesses() ([]Info, error) {
 		return nil, fmt.Errorf("pkg service, GetProcesses: %w", err)
 	}
 
-	var info []Info
+	info := make([]Info, 0, len(proc))
 
-	numWorkers := runtime.NumCPU() * 2
+	numWorkers := processInfoWorkerCount(len(proc))
 	jobs := make(chan int32, len(proc))
-	results := make(chan Info)
+	results := make(chan Info, len(proc))
 	wg := sync.WaitGroup{}
 
 	wg.Add(numWorkers)
@@ -128,6 +130,25 @@ func (p *Parser) AllProcesses() ([]Info, error) {
 	}
 
 	return info, nil
+}
+
+func processInfoWorkerCount(totalProcesses int) int {
+	if totalProcesses <= 0 {
+		return 1
+	}
+
+	workers := runtime.NumCPU()
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > maxProcessInfoWorkers {
+		workers = maxProcessInfoWorkers
+	}
+	if workers > totalProcesses {
+		workers = totalProcesses
+	}
+
+	return workers
 }
 
 // HardObjectParse gathers slower auxiliary details that are only needed in the

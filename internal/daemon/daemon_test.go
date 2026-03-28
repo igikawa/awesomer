@@ -28,6 +28,10 @@ func (s *stubParser) AllProcesses() ([]parser2.Info, error) {
 	return s.allProcesses, s.allErr
 }
 
+func (s *stubParser) Processes() ([]parser2.Info, error) {
+	return s.allProcesses, s.allErr
+}
+
 func (s *stubParser) ProcessInfo(pid int32) (parser2.Info, error) {
 	return parser2.Info{}, nil
 }
@@ -42,9 +46,9 @@ func (s *stubParser) HardObjectParse(pid int32) (parser2.Info, error) {
 
 func TestNewInitializesDependencies(t *testing.T) {
 	var buf bytes.Buffer
-	d := New(&daemonConfig.Config{}, log.New(&buf, "", 0), info.NewAPI())
+	d := New(&daemonConfig.Config{}, log.New(&buf, "", 0), info.NewAPI(), &stubParser{})
 
-	if d.cfg == nil || d.l == nil || d.parse == nil || d.mu == nil || d.api == nil {
+	if d.cfg == nil || d.l == nil || d.snapshots == nil || d.mu == nil || d.api == nil {
 		t.Fatal("New() returned daemon with nil dependency")
 	}
 }
@@ -59,11 +63,11 @@ func TestRunReturnsCreateGroupError(t *testing.T) {
 
 	var buf bytes.Buffer
 	d := &Daemon{
-		cfg:   &daemonConfig.Config{},
-		l:     log.New(&buf, "", 0),
-		parse: &stubParser{},
-		mu:    &sync.Mutex{},
-		api:   info.NewAPI(),
+		cfg:       &daemonConfig.Config{},
+		l:         log.New(&buf, "", 0),
+		snapshots: &stubParser{},
+		mu:        &sync.Mutex{},
+		api:       info.NewAPI(),
 	}
 
 	err := d.Run(context.Background())
@@ -94,7 +98,7 @@ func TestRunJailsProcessAfterThreeViolationsAndCleansUp(t *testing.T) {
 	setGroupRowFn = func(groupName, row, val string) error { return nil }
 	deleteProcessGroupFn = func(groupName string) error { return nil }
 	readDaemonConfigFn = func() (daemonConfig.Config, error) {
-		return daemonConfig.Config{Run: true, Tick: 1, CPULimit: 10, RAMLimit: 10, CPUQuota: 20, RAMQuota: "1G"}, nil
+		return daemonConfig.Config{Run: true, Tick: 1, CPULimit: 10, RAMLimit: 10, CPUQuota: 20, RAMQuota: "1G", Whitelist: []string{"systemd", "sshd"}}, nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -125,9 +129,13 @@ func TestRunJailsProcessAfterThreeViolationsAndCleansUp(t *testing.T) {
 			RAMLimit: 10,
 			CPUQuota: 20,
 			RAMQuota: "1G",
+			Whitelist: []string{
+				"systemd",
+				"sshd",
+			},
 		},
 		l: log.New(&bytes.Buffer{}, "", 0),
-		parse: &stubParser{
+		snapshots: &stubParser{
 			allProcesses: []parser2.Info{{PID: 200, Name: "hog", CPUPercent: 99}},
 			tree:         []int32{200, 201},
 			treeMap:      map[int32][]int32{200: {201}},
@@ -162,7 +170,7 @@ func TestRealTimeReadConfigReloadsConfigFile(t *testing.T) {
 		t.Fatalf("Chdir() error = %v", err)
 	}
 
-	configYAML := []byte("daemon:\n  run: true\n  tick: 9\n  cpu_limit: 50\n  ram_quota: 3G\n")
+	configYAML := []byte("daemon:\n  run: true\n  tick: 9\n  cpu_limit: 50\n  ram_quota: 3G\n  whitelist:\n    - sshd\n    - dockerd\n")
 	if err := os.WriteFile(filepath.Join(dir, rootConfig.FileName), configYAML, 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -175,6 +183,7 @@ func TestRealTimeReadConfigReloadsConfigFile(t *testing.T) {
 		cfg.Tick = 9
 		cfg.CPULimit = 50
 		cfg.RAMQuota = "3G"
+		cfg.Whitelist = []string{"sshd", "dockerd"}
 		return cfg, nil
 	}
 
@@ -182,11 +191,11 @@ func TestRealTimeReadConfigReloadsConfigFile(t *testing.T) {
 	defer cancel()
 
 	d := &Daemon{
-		cfg:   &daemonConfig.Config{},
-		l:     log.New(&bytes.Buffer{}, "", 0),
-		parse: &stubParser{},
-		mu:    &sync.Mutex{},
-		api:   info.NewAPI(),
+		cfg:       &daemonConfig.Config{},
+		l:         log.New(&bytes.Buffer{}, "", 0),
+		snapshots: &stubParser{},
+		mu:        &sync.Mutex{},
+		api:       info.NewAPI(),
 	}
 
 	done := make(chan struct{})
@@ -201,6 +210,9 @@ func TestRealTimeReadConfigReloadsConfigFile(t *testing.T) {
 
 	if !d.cfg.Run || d.cfg.Tick != 9 || d.cfg.CPULimit != 50 || d.cfg.RAMQuota != "3G" {
 		t.Fatalf("cfg not reloaded: %+v", *d.cfg)
+	}
+	if len(d.cfg.Whitelist) != 2 || d.cfg.Whitelist[1] != "dockerd" {
+		t.Fatalf("cfg whitelist not reloaded: %+v", d.cfg.Whitelist)
 	}
 }
 
@@ -244,17 +256,18 @@ func TestRunStopsWhenConfigTurnsDaemonOff(t *testing.T) {
 
 	d := &Daemon{
 		cfg: &daemonConfig.Config{
-			Run:      true,
-			Tick:     1,
-			CPULimit: 10,
-			RAMLimit: 10,
-			CPUQuota: 20,
-			RAMQuota: "1G",
+			Run:       true,
+			Tick:      1,
+			CPULimit:  10,
+			RAMLimit:  10,
+			CPUQuota:  20,
+			RAMQuota:  "1G",
+			Whitelist: []string{"systemd", "sshd"},
 		},
-		l:     log.New(&bytes.Buffer{}, "", 0),
-		parse: &stubParser{},
-		mu:    &sync.Mutex{},
-		api:   info.NewAPI(),
+		l:         log.New(&bytes.Buffer{}, "", 0),
+		snapshots: &stubParser{},
+		mu:        &sync.Mutex{},
+		api:       info.NewAPI(),
 	}
 	d.api.SetJail(101)
 	d.api.SetJail(202)
@@ -273,5 +286,69 @@ func TestRunStopsWhenConfigTurnsDaemonOff(t *testing.T) {
 	}
 	if d.cfg.Run {
 		t.Fatal("Daemon config remained enabled after reload")
+	}
+}
+
+func TestApplyLimitsSkipsWhitelistedProcesses(t *testing.T) {
+	d := &Daemon{
+		cfg: &daemonConfig.Config{
+			Run:       true,
+			Tick:      1,
+			CPULimit:  10,
+			RAMLimit:  10,
+			CPUQuota:  20,
+			RAMQuota:  "1G",
+			Whitelist: []string{"systemd", "dockerd"},
+		},
+		l:         log.New(&bytes.Buffer{}, "", 0),
+		snapshots: &stubParser{},
+		mu:        &sync.Mutex{},
+		api:       info.NewAPI(),
+	}
+
+	violations := make(map[int]int)
+	procs := []parser2.Info{
+		{PID: 200, Name: "dockerd", CPUPercent: 99, MemPercent: 90},
+		{PID: 201, Name: "worker", CPUPercent: 99, MemPercent: 90},
+	}
+
+	active := d.applyLimits(procs, *d.cfg, violations)
+
+	if !active[200] || !active[201] {
+		t.Fatalf("active PIDs = %v, want both processes tracked", active)
+	}
+	if violations[200] != 0 {
+		t.Fatalf("violations for whitelisted process = %d, want 0", violations[200])
+	}
+	if violations[201] != 1 {
+		t.Fatalf("violations for regular process = %d, want 1", violations[201])
+	}
+}
+
+func TestApplyLimitsSkipsProcessesAlreadyInJail(t *testing.T) {
+	api := info.NewAPI()
+	api.SetJail(250)
+
+	d := &Daemon{
+		cfg: &daemonConfig.Config{
+			Run:       true,
+			Tick:      1,
+			CPULimit:  10,
+			RAMLimit:  10,
+			CPUQuota:  20,
+			RAMQuota:  "1G",
+			Whitelist: []string{"systemd", "sshd"},
+		},
+		l:         log.New(&bytes.Buffer{}, "", 0),
+		snapshots: &stubParser{},
+		mu:        &sync.Mutex{},
+		api:       api,
+	}
+
+	violations := make(map[int]int)
+	d.applyLimits([]parser2.Info{{PID: 250, Name: "hog", CPUPercent: 99, MemPercent: 90}}, *d.cfg, violations)
+
+	if violations[250] != 0 {
+		t.Fatalf("violations for jailed process = %d, want 0", violations[250])
 	}
 }
