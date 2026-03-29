@@ -3,7 +3,10 @@
 English version: [README.md](./README.md)
 Документация для разработчиков: [docs/developer.ru.md](./docs/developer.ru.md)
 
-`Awesomer` - консольная утилита для мониторинга и управления процессами Linux. Приложение показывает список процессов в реальном времени, позволяет просматривать информацию по выбранному процессу и умеет запускать фоновый демон, который автоматически помещает "тяжелые" процессы в ограниченную группу ресурсов. Если в системе используется `systemd`, ограничения создаются через transient unit; иначе применяется прямой `cgroup v2`.
+`Awesomer` теперь разделён на два Linux-инструмента:
+
+- `awesomerd`: root-only демон, который постоянно следит за процессами и автоматически помещает "тяжёлые" процессы в ограниченную группу ресурсов;
+- `awesomerctl`: TUI-клиент, который запускается по требованию, локально читает процессы и общается с демоном через Unix socket, если тот доступен.
 
 ## Содержание
 
@@ -68,9 +71,10 @@ English version: [README.md](./README.md)
 ## Структура проекта
 
 ```text
-cmd/project/main.go          Точка входа
+cmd/awesomerctl/main.go      Точка входа клиента `awesomerctl`
+cmd/awesomerd/main.go        Точка входа демона `awesomerd`
 internal/config              Общая конфигурация приложения
-internal/daemon              Демон мониторинга и hot-reload конфигурации
+internal/daemon              Демон мониторинга, IPC и hot-reload конфигурации
 internal/daemon/config       Модель конфигурации демона
 internal/daemon/info         Общий API состояния "процесс в jail"
 internal/service             Бизнес-логика TUI, сортировки и действия
@@ -88,30 +92,47 @@ pkg/mutation                 Низкоуровневые helpers для изм�
 ```bash
 git clone https://github.com/igikawa/awesomer.git
 cd awesomer
-go build -o awesomer ./cmd/project
+go build -o awesomerctl ./cmd/awesomerctl
+go build -o awesomerd ./cmd/awesomerd
+```
+
+### Ручная Установка
+
+```bash
+sudo install -m 0755 awesomerctl /usr/bin/awesomerctl
+sudo install -m 0755 awesomerd /usr/bin/awesomerd
+sudo install -d -m 0755 /etc/awesomer
+sudo install -m 0644 internal/config/config.yaml.example /etc/awesomer/config.yaml
+sudo install -m 0644 deploy/systemd/awesomerd.service /etc/systemd/system/awesomerd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now awesomerd.service
 ```
 
 ### Быстрый старт
 
 ```bash
-cp internal/config/config.yaml.example config.yaml
-./awesomer
+mkdir -p ~/.config/awesomer
+cp internal/config/config.yaml.example ~/.config/awesomer/config.yaml
+./awesomerctl
 ```
 
-Если планируется использовать демон и ограничение процессов, запускать лучше с пользователем, у которого есть права на работу с `systemd` и/или `/sys/fs/cgroup`, а также доступ к целевым процессам.
+`awesomerctl` сам не поднимает демон.
+Если существует `/run/awesomer.sock`, клиент подключается к `awesomerd`; иначе работает как offline monitor.
 
 ### Запуск без предварительной сборки
 
 ```bash
-cp internal/config/config.yaml.example config.yaml
-go run ./cmd/project
+mkdir -p ~/.config/awesomer
+cp internal/config/config.yaml.example ~/.config/awesomer/config.yaml
+go run ./cmd/awesomerctl
+sudo go run ./cmd/awesomerd
 ```
 
 ### Что происходит при старте
 
-- Приложение читает `config.yaml` из корня репозитория.
-- Если `config.yaml` отсутствует, программа создаёт пустой файл и использует значения по умолчанию.
-- Если `daemon.run: true`, вместе с TUI стартует фоновый демон.
+- `awesomerctl` читает `~/.config/awesomer/config.yaml` для обычного пользователя и `/etc/awesomer/config.yaml` для root.
+- `awesomerd` - отдельный root-only процесс. Он читает `/etc/awesomer/config.yaml`, создаёт `/run/awesomer.sock` и перечитывает daemon-настройки на лету.
+- `awesomerctl` никогда не владеет демоном и только подключается к нему, если socket доступен.
 
 ## Конфигурация
 
@@ -159,8 +180,8 @@ ui:
 
 ### Параметры демона
 
-- `daemon.run` - запускать ли демон вместе с TUI.
-  - По умолчанию: `false`
+- `daemon.run` - должен ли `awesomerd` реально применять ограничения после старта.
+  - По умолчанию: `true`
 - `daemon.tick` - период опроса процессов демоном в секундах.
   - По умолчанию: `3`
 - `daemon.cpu_limit` - порог CPU, после которого процесс получает замечание.
@@ -180,7 +201,49 @@ ui:
   - Подходит для системных и критичных сервисов, которые администратор хочет исключить из автоматического ограничения.
   - По умолчанию: `["systemd", "sshd"]`
 
-Демон перечитывает `config.yaml` на лету, поэтому изменения конфигурации применяются без перезапуска приложения.
+`awesomerd` перечитывает `config.yaml` на лету, поэтому изменения конфигурации применяются без его перезапуска.
+
+### systemd Service
+
+Пример unit-файла лежит в `deploy/systemd/awesomerd.service`.
+
+Типовая установка:
+
+```bash
+sudo cp deploy/systemd/awesomerd.service /etc/systemd/system/awesomerd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now awesomerd.service
+```
+
+Когда service уже запущен, `awesomerctl` подключается к daemon через `/run/awesomer.sock`.
+
+Полезные операции:
+
+```bash
+systemctl status awesomerd.service
+sudo systemctl restart awesomerd.service
+journalctl -u awesomerd.service -f
+awesomerctl
+sudo awesomerctl
+```
+
+### Debian Пакет
+
+В репозитории есть простой builder:
+
+```bash
+chmod +x packaging/deb/build.sh
+./packaging/deb/build.sh 0.1.0
+```
+
+Он создаёт `dist/awesomer_0.1.0_<arch>.deb`.
+
+Установка и запуск:
+
+```bash
+sudo dpkg -i dist/awesomer_0.1.0_$(dpkg --print-architecture).deb
+sudo systemctl enable --now awesomerd.service
+```
 
 ### Параметры интерфейса
 
@@ -234,6 +297,8 @@ ui:
 - `t` - по числу потоков
 - `u` - по пользователю
 
+Активная колонка сортировки отображается жирным заголовком.
+
 ### Действия над процессом
 
 - `Enter` - показать краткую информацию по выбранному процессу
@@ -276,7 +341,7 @@ ui:
 
 ## Как работает демон
 
-Если `daemon.run: true`, приложение запускает фоновый демон одновременно с TUI.
+`awesomerd` — это отдельный процесс или `systemd` service. `awesomerctl` только подключается к нему.
 
 Алгоритм работы:
 
@@ -291,7 +356,7 @@ ui:
 
 Помимо автоматического режима, процесс можно вручную отправить в `processJail` клавишей `j`. Для ручного перевода используются те же значения `daemon.cpu_quota` и `daemon.ram_quota`.
 
-При завершении приложения или переключении `daemon.run` в `false` демон сначала возвращает jailed-процессы в root group, а затем удаляет созданный `systemd` unit или `cgroup`.
+Когда `awesomerd` завершается или `daemon.run` переключается в `false`, демон сначала возвращает jailed-процессы в root group, а затем удаляет созданный `systemd` unit или `cgroup`.
 
 ## Логи
 

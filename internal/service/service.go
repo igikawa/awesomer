@@ -3,10 +3,10 @@ package service
 import (
 	"awesomeProject/internal/collector"
 	daemonConfig "awesomeProject/internal/daemon/config"
-	daemonAPI "awesomeProject/internal/daemon/info"
+	daemonInfo "awesomeProject/internal/daemon/info"
 	"awesomeProject/pkg/cgroups"
 	"awesomeProject/pkg/mutation"
-	parser "awesomeProject/pkg/parser"
+	"awesomeProject/pkg/parser"
 	"fmt"
 	"os"
 	"slices"
@@ -32,12 +32,17 @@ var (
 type Service struct {
 	snapshots   collector.Provider
 	mu          *sync.RWMutex
-	daemon      *daemonAPI.API
+	daemon      daemonInfo.JailState
+	controller  JailController
 	daemonCfg   *daemonConfig.Config
 	sortProcMod string
 	lastSortMod string
 	lastStates  []rowState
 	lastRows    []table.Row
+}
+
+type JailController interface {
+	ToggleProcessJail(pid int) (bool, error)
 }
 
 type rowState struct {
@@ -50,17 +55,32 @@ type rowState struct {
 	InJail  bool
 }
 
-func New(d *daemonAPI.API, daemonCfg *daemonConfig.Config, snapshots collector.Provider) *Service {
+func New(d daemonInfo.JailState, daemonCfg *daemonConfig.Config, snapshots collector.Provider) *Service {
+	return NewWithController(d, daemonCfg, snapshots, newLocalJailController(d, daemonCfg, snapshots))
+}
+
+func NewWithController(d daemonInfo.JailState, daemonCfg *daemonConfig.Config, snapshots collector.Provider, controller JailController) *Service {
 	if snapshots == nil {
 		snapshots = collector.New()
+	}
+	if d == nil {
+		d = daemonInfo.NewAPI()
+	}
+	if daemonCfg == nil {
+		cfg := daemonConfig.DefaultConfig()
+		daemonCfg = &cfg
+	}
+	if controller == nil {
+		controller = unavailableJailController{}
 	}
 
 	return &Service{
 		snapshots:   snapshots,
 		mu:          &sync.RWMutex{},
 		daemon:      d,
+		controller:  controller,
 		daemonCfg:   daemonCfg,
-		sortProcMod: "empty",
+		sortProcMod: "-p",
 	}
 }
 
@@ -72,6 +92,8 @@ func (s *Service) GetProcesses() ([]table.Row, bool, error) {
 
 	sortMode := s.currentSortMode()
 	switch sortMode {
+	case "-p":
+		s.sortByPID(proc)
 	case "-n":
 		s.sortByName(proc)
 	case "-c":
@@ -134,6 +156,10 @@ func (s *Service) currentSortMode() string {
 	return s.sortProcMod
 }
 
+func (s *Service) CurrentSortProcMod() string {
+	return s.currentSortMode()
+}
+
 func (s *Service) cachedRows(sortMode string, states []rowState) ([]table.Row, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -167,6 +193,17 @@ func (s *Service) sortByCPU(proc []parser.Info) {
 		if a.CPUPercent > b.CPUPercent {
 			return -1
 		} else if a.CPUPercent < b.CPUPercent {
+			return 1
+		}
+		return 0
+	})
+}
+
+func (s *Service) sortByPID(proc []parser.Info) {
+	slices.SortFunc(proc, func(a, b parser.Info) int {
+		if a.PID < b.PID {
+			return -1
+		} else if a.PID > b.PID {
 			return 1
 		}
 		return 0
@@ -330,41 +367,67 @@ func (s *Service) SetNoFileLimit(pid int, limit uint64) error {
 	return nil
 }
 
-// ToggleProcessJail mirrors daemon behaviour for manual actions: configure the
-// jail once on entry, then move either the full tree into processJail or back
-// to the root group.
 func (s *Service) ToggleProcessJail(pid int) (bool, error) {
-	tree, _, err := s.snapshots.ProcessTree(int32(pid))
+	inJail, err := s.controller.ToggleProcessJail(pid)
 	if err != nil {
 		return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
 	}
+	return inJail, nil
+}
 
-	inJail := s.daemon.InJail(pid)
+type localJailController struct {
+	state     daemonInfo.JailState
+	daemonCfg *daemonConfig.Config
+	snapshots collector.Provider
+}
+
+func newLocalJailController(state daemonInfo.JailState, daemonCfg *daemonConfig.Config, snapshots collector.Provider) JailController {
+	if snapshots == nil {
+		snapshots = collector.New()
+	}
+	return localJailController{
+		state:     state,
+		daemonCfg: daemonCfg,
+		snapshots: snapshots,
+	}
+}
+
+func (c localJailController) ToggleProcessJail(pid int) (bool, error) {
+	tree, _, err := c.snapshots.ProcessTree(int32(pid))
+	if err != nil {
+		return false, err
+	}
+
+	inJail := c.state.InJail(pid)
 	if !inJail {
-		if err = setGroupRowFn(processJailGroup, "cpu.max", fmt.Sprintf("%d 100000", int(s.daemonCfg.CPUQuota)*1000)); err != nil {
-			return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+		if err = setGroupRowFn(processJailGroup, "cpu.max", fmt.Sprintf("%d 100000", int(c.daemonCfg.CPUQuota)*1000)); err != nil {
+			return false, err
 		}
-		if err = setGroupRowFn(processJailGroup, "memory.max", s.daemonCfg.RAMQuota); err != nil {
-			return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+		if err = setGroupRowFn(processJailGroup, "memory.max", c.daemonCfg.RAMQuota); err != nil {
+			return false, err
 		}
 	}
 
 	for _, memberPID := range tree {
 		targetPID := int(memberPID)
 		if inJail {
-			err = moveToRootGroupFn(targetPID)
-			if err != nil {
-				return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+			if err = moveToRootGroupFn(targetPID); err != nil {
+				return false, err
 			}
-			s.daemon.DeleteFromJail(targetPID)
+			c.state.DeleteFromJail(targetPID)
 			continue
 		}
-		err = addProcessToGroupFn(targetPID, processJailGroup)
-		if err != nil {
-			return false, fmt.Errorf("pkg service, ToggleProcessJail: %w", err)
+		if err = addProcessToGroupFn(targetPID, processJailGroup); err != nil {
+			return false, err
 		}
-		s.daemon.SetJail(targetPID)
+		c.state.SetJail(targetPID)
 	}
 
 	return !inJail, nil
+}
+
+type unavailableJailController struct{}
+
+func (unavailableJailController) ToggleProcessJail(pid int) (bool, error) {
+	return false, fmt.Errorf("daemon control is unavailable")
 }

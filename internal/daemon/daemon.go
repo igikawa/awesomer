@@ -4,7 +4,7 @@ import (
 	"awesomeProject/internal/collector"
 	rootConfig "awesomeProject/internal/config"
 	"awesomeProject/internal/daemon/config"
-	"awesomeProject/internal/daemon/info"
+	daemonInfo "awesomeProject/internal/daemon/info"
 	"awesomeProject/pkg/cgroups"
 	"awesomeProject/pkg/parser"
 	"context"
@@ -28,7 +28,11 @@ var (
 	addProcessToGroupFn  = cgroups.AddProcessToGroup
 	moveToRootGroupFn    = cgroups.MoveProcessToRootGroup
 	readDaemonConfigFn   = func() (config.Config, error) {
-		cfg, err := rootConfig.ReadConfig(rootConfig.FileName)
+		path, err := rootConfig.ResolveConfigPath()
+		if err != nil {
+			return config.Config{}, err
+		}
+		cfg, err := rootConfig.ReadConfig(path)
 		if err != nil {
 			return config.Config{}, err
 		}
@@ -42,10 +46,10 @@ type Daemon struct {
 	l         *log.Logger
 	snapshots collector.Provider
 	mu        *sync.Mutex
-	api       *info.API
+	api       daemonInfo.JailState
 }
 
-func New(cfg *config.Config, l *log.Logger, api *info.API, snapshots collector.Provider) *Daemon {
+func New(cfg *config.Config, l *log.Logger, api daemonInfo.JailState, snapshots collector.Provider) *Daemon {
 	if snapshots == nil {
 		snapshots = collector.New()
 	}
@@ -99,7 +103,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 // realTimeReadConfig continuously refreshes daemon settings until the context
-// is cancelled or the updated config explicitly disables daemon mode.
+// is canceled or the updated config explicitly disables daemon mode.
 func (d *Daemon) realTimeReadConfig(ctx context.Context) {
 	for {
 		select {
@@ -223,6 +227,38 @@ func (d *Daemon) putTreeInGroup(rootPID int32) {
 		d.api.SetJail(int(memberPID))
 		d.l.Printf("added process %d in jail", memberPID)
 	}
+}
+
+func (d *Daemon) ToggleProcessJail(pid int) (bool, error) {
+	tree, _, err := d.snapshots.ProcessTree(int32(pid))
+	if err != nil {
+		return false, fmt.Errorf("error reading process tree for %d: %w", pid, err)
+	}
+
+	inJail := d.api.InJail(pid)
+	if !inJail {
+		if err := d.configureGroup(); err != nil {
+			return false, err
+		}
+		for _, memberPID := range tree {
+			targetPID := int(memberPID)
+			if err := addProcessToGroupFn(targetPID, CgroupName); err != nil {
+				return false, fmt.Errorf("error added process %d in jail: %w", targetPID, err)
+			}
+			d.api.SetJail(targetPID)
+		}
+		return true, nil
+	}
+
+	for _, memberPID := range tree {
+		targetPID := int(memberPID)
+		if err := moveToRootGroupFn(targetPID); err != nil {
+			return false, fmt.Errorf("failed to move process %d to root group: %w", targetPID, err)
+		}
+		d.api.DeleteFromJail(targetPID)
+	}
+
+	return false, nil
 }
 
 func (d *Daemon) cleanupInactive(violations map[int]int, activePIDs map[int]bool) {

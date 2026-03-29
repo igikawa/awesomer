@@ -3,7 +3,10 @@
 Russian version: [ru_README.md](./ru_README.md)
 Developer guide: [docs/developer.md](./docs/developer.md)
 
-`Awesomer` is a Linux terminal utility for process monitoring and control. It shows a live process list, lets you inspect detailed information for the selected process, and can run a background daemon that automatically moves heavy processes into a constrained resource group. If the target system uses `systemd`, limits are managed through a transient unit; otherwise the application falls back to direct `cgroup v2` usage.
+`Awesomer` is split into two Linux tools:
+
+- `awesomerd`: a root-only background daemon that watches processes and moves heavy workloads into a constrained resource group;
+- `awesomerctl`: an on-demand TUI monitor that inspects local processes and talks to the daemon over a Unix socket when it is available.
 
 ## Contents
 
@@ -68,9 +71,10 @@ Practical considerations:
 ## Project Structure
 
 ```text
-cmd/project/main.go          Entry point
+cmd/awesomerctl/main.go      `awesomerctl` client entry point
+cmd/awesomerd/main.go        `awesomerd` daemon entry point
 internal/config              Shared application configuration
-internal/daemon              Monitoring daemon and hot-reload logic
+internal/daemon              Monitoring daemon, IPC, and hot-reload logic
 internal/daemon/config       Daemon configuration model
 internal/daemon/info         Shared API for "process in jail" state
 internal/service             TUI business logic, sorting, and actions
@@ -88,30 +92,47 @@ pkg/mutation                 Low-level process mutation helpers
 ```bash
 git clone https://github.com/igikawa/awesomer.git
 cd awesomer
-go build -o awesomer ./cmd/project
+go build -o awesomerctl ./cmd/awesomerctl
+go build -o awesomerd ./cmd/awesomerd
+```
+
+### Manual Install
+
+```bash
+sudo install -m 0755 awesomerctl /usr/bin/awesomerctl
+sudo install -m 0755 awesomerd /usr/bin/awesomerd
+sudo install -d -m 0755 /etc/awesomer
+sudo install -m 0644 internal/config/config.yaml.example /etc/awesomer/config.yaml
+sudo install -m 0644 deploy/systemd/awesomerd.service /etc/systemd/system/awesomerd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now awesomerd.service
 ```
 
 ### Quick Start
 
 ```bash
-cp internal/config/config.yaml.example config.yaml
-./awesomer
+mkdir -p ~/.config/awesomer
+cp internal/config/config.yaml.example ~/.config/awesomer/config.yaml
+./awesomerctl
 ```
 
-If you plan to use the daemon and resource limiting, run the application as a user that has access to `systemd` and/or `/sys/fs/cgroup`, and to the target processes.
+`awesomerctl` is just a monitor client. It does not start the daemon locally.
+If `/run/awesomer.sock` exists, the client connects to `awesomerd`; otherwise it works in offline monitor mode.
 
 ### Run Without Building First
 
 ```bash
-cp internal/config/config.yaml.example config.yaml
-go run ./cmd/project
+mkdir -p ~/.config/awesomer
+cp internal/config/config.yaml.example ~/.config/awesomer/config.yaml
+go run ./cmd/awesomerctl
+sudo go run ./cmd/awesomerd
 ```
 
 ### What Happens on Startup
 
-- The application reads `config.yaml` from the repository root.
-- If `config.yaml` does not exist, the program creates an empty file and uses default values.
-- If `daemon.run: true`, the background daemon starts together with the TUI.
+- `awesomerctl` reads `~/.config/awesomer/config.yaml` for regular users and `/etc/awesomer/config.yaml` for root.
+- `awesomerd` is a separate root-only process. It reads `/etc/awesomer/config.yaml`, creates `/run/awesomer.sock`, and hot-reloads daemon settings.
+- `awesomerctl` never starts or owns the daemon; it only connects to it when the socket is available.
 
 ## Configuration
 
@@ -159,8 +180,8 @@ ui:
 
 ### Daemon Parameters
 
-- `daemon.run`: whether to start the daemon together with the TUI.
-  - Default: `false`
+- `daemon.run`: whether `awesomerd` should actually enforce limits after startup.
+  - Default: `true`
 - `daemon.tick`: daemon polling interval in seconds.
   - Default: `3`
 - `daemon.cpu_limit`: CPU threshold after which a process receives a warning.
@@ -180,7 +201,49 @@ ui:
   - Intended for critical services that an administrator wants to protect from automatic limiting.
   - Default: `["systemd", "sshd"]`
 
-The daemon hot-reloads `config.yaml`, so configuration changes are applied without restarting the application.
+`awesomerd` hot-reloads `config.yaml`, so configuration changes are applied without restarting the daemon.
+
+### systemd Service
+
+A sample unit file is available at `deploy/systemd/awesomerd.service`.
+
+Typical install flow:
+
+```bash
+sudo cp deploy/systemd/awesomerd.service /etc/systemd/system/awesomerd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now awesomerd.service
+```
+
+When the service is running, `awesomerctl` connects to the daemon over `/run/awesomer.sock`.
+
+Useful operations:
+
+```bash
+systemctl status awesomerd.service
+sudo systemctl restart awesomerd.service
+journalctl -u awesomerd.service -f
+awesomerctl
+sudo awesomerctl
+```
+
+### Debian Package
+
+The repository includes a simple package builder:
+
+```bash
+chmod +x packaging/deb/build.sh
+./packaging/deb/build.sh 0.1.0
+```
+
+It produces `dist/awesomer_0.1.0_<arch>.deb`.
+
+Install and start:
+
+```bash
+sudo dpkg -i dist/awesomer_0.1.0_$(dpkg --print-architecture).deb
+sudo systemctl enable --now awesomerd.service
+```
 
 ### UI Parameters
 
@@ -234,6 +297,8 @@ At startup, the right panel shows built-in help. The process list refreshes by t
 - `t`: by thread count
 - `u`: by user
 
+The active sort column is rendered in bold in the table header.
+
 ### Process Actions
 
 - `Enter`: show compact information for the selected process
@@ -276,7 +341,7 @@ At startup, the right panel shows built-in help. The process list refreshes by t
 
 ## How the Daemon Works
 
-If `daemon.run: true`, the application starts the background daemon together with the TUI.
+`awesomerd` is a separate process or `systemd` service. `awesomerctl` only connects to it.
 
 Algorithm:
 
@@ -291,7 +356,7 @@ Algorithm:
 
 In addition to automatic mode, a process can be sent to `processJail` manually with the `j` key. Manual moves use the same `daemon.cpu_quota` and `daemon.ram_quota` values.
 
-When the application shuts down or `daemon.run` is switched to `false`, the daemon first returns jailed processes to the root group and then removes the created `systemd` unit or `cgroup`.
+When `awesomerd` shuts down or `daemon.run` is switched to `false`, it first returns jailed processes to the root group and then removes the created `systemd` unit or `cgroup`.
 
 ## Logs
 

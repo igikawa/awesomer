@@ -1,11 +1,11 @@
 package parser
 
 import (
+	"awesomeProject/pkg/mutation"
 	"fmt"
 	"runtime"
 	"sync"
 
-	"awesomeProject/pkg/mutation"
 	"github.com/shirou/gopsutil/v4/process"
 	"golang.org/x/sys/unix"
 )

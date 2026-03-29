@@ -209,6 +209,13 @@ func deleteSystemdUnit(groupName string) error {
 		return fmt.Errorf("failed to stop systemd unit: %v", err)
 	}
 
+	// reset-failed makes systemd drop leftover failed state for transient units
+	// so a graceful daemon shutdown removes the unit cleanly as well.
+	_, err = runCommandFn("systemctl", "reset-failed", systemdUnitName(groupName))
+	if err != nil && !isIgnorableSystemdUnitStateError(err) {
+		return fmt.Errorf("failed to reset systemd unit state: %v", err)
+	}
+
 	return nil
 }
 
@@ -286,6 +293,7 @@ func systemdRunArgs(groupName, sleepPath string) []string {
 		"--quiet",
 		"--unit", systemdUnitName(groupName),
 		"--service-type=exec",
+		"--property=CollectMode=inactive-or-failed",
 		"--property=CPUAccounting=yes",
 		"--property=MemoryAccounting=yes",
 		sleepPath,
@@ -305,4 +313,11 @@ func runCommand(name string, args ...string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(out)), nil
+}
+
+func isIgnorableSystemdUnitStateError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unit processjail.service not loaded") ||
+		strings.Contains(msg, "unit not loaded") ||
+		strings.Contains(msg, "not loaded")
 }

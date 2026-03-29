@@ -73,12 +73,7 @@ func mapsClone(in map[int32][]int32) map[int32][]int32 {
 }
 
 func newTestService(p *stubParser) *Service {
-	return &Service{
-		snapshots: p,
-		mu:        &sync.RWMutex{},
-		daemon:    daemonAPI.NewAPI(),
-		daemonCfg: &daemonConfig.Config{CPUQuota: 25, RAMQuota: "512M"},
-	}
+	return New(daemonAPI.NewAPI(), &daemonConfig.Config{CPUQuota: 25, RAMQuota: "512M"}, p)
 }
 
 func TestNewInitializesServiceDefaults(t *testing.T) {
@@ -96,8 +91,8 @@ func TestNewInitializesServiceDefaults(t *testing.T) {
 	if svc.daemonCfg == nil {
 		t.Fatal("New() daemon config is nil")
 	}
-	if svc.sortProcMod != "empty" {
-		t.Fatalf("sortProcMod = %q, want empty", svc.sortProcMod)
+	if svc.sortProcMod != "-p" {
+		t.Fatalf("sortProcMod = %q, want -p", svc.sortProcMod)
 	}
 }
 
@@ -137,6 +132,7 @@ func TestGetProcessesSupportsAllSortModes(t *testing.T) {
 		mode    string
 		wantPID string
 	}{
+		{name: "sort by pid", mode: "-p", wantPID: "10"},
 		{name: "sort by name", mode: "-n", wantPID: "20"},
 		{name: "sort by mem", mode: "-m", wantPID: "30"},
 		{name: "sort by threads", mode: "-t", wantPID: "30"},

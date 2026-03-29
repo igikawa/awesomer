@@ -4,6 +4,13 @@ import (
 	"sync"
 )
 
+type JailState interface {
+	InJail(pid int) bool
+	SetJail(pid int)
+	DeleteFromJail(pid int)
+	PIDs() []int
+}
+
 type API struct {
 	mu   sync.Mutex
 	jail map[int]bool

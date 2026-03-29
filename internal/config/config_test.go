@@ -7,16 +7,17 @@ import (
 )
 
 func TestNewConfigReturnsZeroValuesWhenConfigFileIsMissing(t *testing.T) {
-	dir := t.TempDir()
-	prevWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	defer func() { _ = os.Chdir(prevWD) }()
+	origUserConfigDir := userConfigDirFn
+	origEUID := currentEUIDFn
+	defer func() {
+		userConfigDirFn = origUserConfigDir
+		currentEUIDFn = origEUID
+	}()
 
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
+	userConfigDirFn = func() (string, error) {
+		return filepath.Join(t.TempDir(), ".config"), nil
 	}
+	currentEUIDFn = func() int { return 1000 }
 
 	cfg := NewConfig()
 
@@ -39,18 +40,23 @@ func TestNewConfigReturnsZeroValuesWhenConfigFileIsMissing(t *testing.T) {
 
 func TestNewConfigReadsYAMLFile(t *testing.T) {
 	dir := t.TempDir()
-	prevWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	defer func() { _ = os.Chdir(prevWD) }()
+	origUserConfigDir := userConfigDirFn
+	origEUID := currentEUIDFn
+	defer func() {
+		userConfigDirFn = origUserConfigDir
+		currentEUIDFn = origEUID
+	}()
 
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
+	userConfigDirFn = func() (string, error) {
+		return dir, nil
 	}
+	currentEUIDFn = func() int { return 1000 }
 
 	configYAML := []byte("tick: 9\nlogger:\n  log_path: /tmp/app.log\ndaemon:\n  run: true\n  tick: 7\n  ram_quota: 2G\n  whitelist:\n    - systemd\n    - dockerd\nui:\n  table_width: 48\n  border_color: \"240\"\n")
-	if err := os.WriteFile(filepath.Join(dir, FileName), configYAML, 0644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, AppName), 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, AppName, FileName), configYAML, 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -79,5 +85,76 @@ func TestNewConfigReadsYAMLFile(t *testing.T) {
 	}
 	if cfg.UI.BorderColor != "240" {
 		t.Fatalf("UI.BorderColor = %q, want 240", cfg.UI.BorderColor)
+	}
+}
+
+func TestResolveConfigPathPrefersUserConfig(t *testing.T) {
+	dir := t.TempDir()
+	origUserConfigDir := userConfigDirFn
+	origEUID := currentEUIDFn
+	defer func() {
+		userConfigDirFn = origUserConfigDir
+		currentEUIDFn = origEUID
+	}()
+
+	userConfigDirFn = func() (string, error) {
+		return dir, nil
+	}
+	currentEUIDFn = func() int { return 1000 }
+
+	userPath := filepath.Join(dir, AppName, FileName)
+	if err := os.MkdirAll(filepath.Dir(userPath), 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(userPath, []byte("tick: 1\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	path, err := ResolveConfigPath()
+	if err != nil {
+		t.Fatalf("ResolveConfigPath() error = %v", err)
+	}
+	if path != userPath {
+		t.Fatalf("ResolveConfigPath() = %q, want %q", path, userPath)
+	}
+}
+
+func TestResolveConfigPathReturnsUserPathWhenNothingExists(t *testing.T) {
+	dir := t.TempDir()
+	origUserConfigDir := userConfigDirFn
+	origEUID := currentEUIDFn
+	defer func() {
+		userConfigDirFn = origUserConfigDir
+		currentEUIDFn = origEUID
+	}()
+
+	userConfigDirFn = func() (string, error) {
+		return dir, nil
+	}
+	currentEUIDFn = func() int { return 1000 }
+
+	path, err := ResolveConfigPath()
+	if err != nil {
+		t.Fatalf("ResolveConfigPath() error = %v", err)
+	}
+
+	want := filepath.Join(dir, AppName, FileName)
+	if path != want {
+		t.Fatalf("ResolveConfigPath() = %q, want %q", path, want)
+	}
+}
+
+func TestResolveConfigPathUsesSystemPathForRoot(t *testing.T) {
+	origEUID := currentEUIDFn
+	defer func() { currentEUIDFn = origEUID }()
+
+	currentEUIDFn = func() int { return 0 }
+
+	path, err := ResolveConfigPath()
+	if err != nil {
+		t.Fatalf("ResolveConfigPath() error = %v", err)
+	}
+	if path != SystemConfigPath {
+		t.Fatalf("ResolveConfigPath() = %q, want %q", path, SystemConfigPath)
 	}
 }

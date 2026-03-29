@@ -1,6 +1,7 @@
 package cgroups
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,5 +289,154 @@ func TestSetGroupRowUsesSystemdProperties(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(calls, "\n"), "systemctl set-property demo.service MemoryMax=8G") {
 		t.Fatalf("calls = %v, want MemoryMax mapping", calls)
+	}
+}
+
+func TestCreateProcessGroupUsesSystemdCollectMode(t *testing.T) {
+	tmp := t.TempDir()
+	origRoot := cgroupRootPath
+	origProcess1 := process1CommPath
+	origRunDir := systemdRunDir
+	origLookPath := lookPathFn
+	origRunCommand := runCommandFn
+	cgroupRootPath = tmp
+	process1CommPath = filepath.Join(tmp, "proc1comm")
+	systemdRunDir = filepath.Join(tmp, "run-systemd")
+	defer func() {
+		cgroupRootPath = origRoot
+		process1CommPath = origProcess1
+		systemdRunDir = origRunDir
+		lookPathFn = origLookPath
+		runCommandFn = origRunCommand
+	}()
+
+	if err := os.WriteFile(process1CommPath, []byte("systemd\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.MkdirAll(systemdRunDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	lookPathFn = func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	var calls []string
+	runCommandFn = func(name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if name == "systemctl" && len(args) >= 5 && args[0] == "show" {
+			return "", nil
+		}
+		return "", nil
+	}
+
+	if err := CreateProcessGroup("demo"); err != nil {
+		t.Fatalf("CreateProcessGroup() error = %v", err)
+	}
+
+	got := strings.Join(calls, "\n")
+	if !strings.Contains(got, "systemd-run --quiet --unit demo.service --service-type=exec --property=CollectMode=inactive-or-failed --property=CPUAccounting=yes --property=MemoryAccounting=yes") {
+		t.Fatalf("calls = %v, want systemd-run with CollectMode", calls)
+	}
+}
+
+func TestDeleteProcessGroupResetsSystemdFailedState(t *testing.T) {
+	tmp := t.TempDir()
+	origRoot := cgroupRootPath
+	origProcess1 := process1CommPath
+	origRunDir := systemdRunDir
+	origLookPath := lookPathFn
+	origRunCommand := runCommandFn
+	cgroupRootPath = tmp
+	process1CommPath = filepath.Join(tmp, "proc1comm")
+	systemdRunDir = filepath.Join(tmp, "run-systemd")
+	defer func() {
+		cgroupRootPath = origRoot
+		process1CommPath = origProcess1
+		systemdRunDir = origRunDir
+		lookPathFn = origLookPath
+		runCommandFn = origRunCommand
+	}()
+
+	if err := os.WriteFile(process1CommPath, []byte("systemd\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.MkdirAll(systemdRunDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "system.slice", "demo.service"), 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	lookPathFn = func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	var calls []string
+	runCommandFn = func(name string, args ...string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if name == "systemctl" && len(args) >= 5 && args[0] == "show" {
+			return "/system.slice/demo.service", nil
+		}
+		return "", nil
+	}
+
+	if err := DeleteProcessGroup("demo"); err != nil {
+		t.Fatalf("DeleteProcessGroup() error = %v", err)
+	}
+
+	got := strings.Join(calls, "\n")
+	if !strings.Contains(got, "systemctl stop demo.service") {
+		t.Fatalf("calls = %v, want systemctl stop", calls)
+	}
+	if !strings.Contains(got, "systemctl reset-failed demo.service") {
+		t.Fatalf("calls = %v, want systemctl reset-failed", calls)
+	}
+}
+
+func TestDeleteProcessGroupIgnoresResetFailedWhenUnitAlreadyUnloaded(t *testing.T) {
+	tmp := t.TempDir()
+	origRoot := cgroupRootPath
+	origProcess1 := process1CommPath
+	origRunDir := systemdRunDir
+	origLookPath := lookPathFn
+	origRunCommand := runCommandFn
+	cgroupRootPath = tmp
+	process1CommPath = filepath.Join(tmp, "proc1comm")
+	systemdRunDir = filepath.Join(tmp, "run-systemd")
+	defer func() {
+		cgroupRootPath = origRoot
+		process1CommPath = origProcess1
+		systemdRunDir = origRunDir
+		lookPathFn = origLookPath
+		runCommandFn = origRunCommand
+	}()
+
+	if err := os.WriteFile(process1CommPath, []byte("systemd\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.MkdirAll(systemdRunDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "system.slice", "demo.service"), 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	lookPathFn = func(file string) (string, error) {
+		return "/usr/bin/" + file, nil
+	}
+
+	runCommandFn = func(name string, args ...string) (string, error) {
+		if name == "systemctl" && len(args) >= 5 && args[0] == "show" {
+			return "/system.slice/demo.service", nil
+		}
+		if name == "systemctl" && len(args) >= 2 && args[0] == "reset-failed" {
+			return "", fmt.Errorf("exit status 1: Failed to reset failed state of unit demo.service: Unit demo.service not loaded")
+		}
+		return "", nil
+	}
+
+	if err := DeleteProcessGroup("demo"); err != nil {
+		t.Fatalf("DeleteProcessGroup() error = %v", err)
 	}
 }

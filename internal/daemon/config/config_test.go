@@ -5,8 +5,8 @@ import "testing"
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Run {
-		t.Fatal("Run = true, want false")
+	if !cfg.Run {
+		t.Fatal("Run = false, want true")
 	}
 	if cfg.Tick != 3 {
 		t.Fatalf("Tick = %d, want 3", cfg.Tick)

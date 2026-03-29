@@ -4,7 +4,7 @@ import (
 	"awesomeProject/internal/collector"
 	"awesomeProject/internal/config"
 	daemonConfig "awesomeProject/internal/daemon/config"
-	"awesomeProject/internal/daemon/info"
+	daemonInfo "awesomeProject/internal/daemon/info"
 	parserpkg "awesomeProject/pkg/parser"
 	"bytes"
 	"errors"
@@ -41,10 +41,15 @@ type stubService struct {
 	togglePID     int
 	treeText      string
 	treeErr       error
+	currentSort   string
 }
 
 func (s *stubService) GetProcesses() ([]table.Row, bool, error) { return s.rows, s.changed, s.getErr }
-func (s *stubService) SetSortProcMod(mode string)               { s.sortModes = append(s.sortModes, mode) }
+func (s *stubService) SetSortProcMod(mode string) {
+	s.sortModes = append(s.sortModes, mode)
+	s.currentSort = mode
+}
+func (s *stubService) CurrentSortProcMod() string { return s.currentSort }
 func (s *stubService) GetTuiTree(root int32, tree map[int32][]int32) (string, error) {
 	return s.treeText, s.treeErr
 }
@@ -135,7 +140,7 @@ func TestRunUsesInjectedProgram(t *testing.T) {
 		exitFn = origExit
 	}()
 
-	newServiceFn = func(api *info.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+	newServiceFn = func(api daemonInfo.JailState, cfg *config.Config, snapshots collector.Provider) serviceAPI {
 		return &stubService{}
 	}
 	newParserFn = func() parserAPI { return &stubParser{} }
@@ -152,7 +157,7 @@ func TestRunUsesInjectedProgram(t *testing.T) {
 	exitFn = func(code int) {}
 
 	cfg := &config.Config{Daemon: daemonConfig.Config{}}
-	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err != nil {
+	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), daemonInfo.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if !called {
@@ -172,7 +177,7 @@ func TestRunReturnsProgramError(t *testing.T) {
 		exitFn = origExit
 	}()
 
-	newServiceFn = func(api *info.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+	newServiceFn = func(api daemonInfo.JailState, cfg *config.Config, snapshots collector.Provider) serviceAPI {
 		return &stubService{}
 	}
 	newParserFn = func() parserAPI { return &stubParser{} }
@@ -182,7 +187,7 @@ func TestRunReturnsProgramError(t *testing.T) {
 	exitFn = func(code int) {}
 
 	cfg := &config.Config{}
-	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err == nil {
+	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), daemonInfo.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err == nil {
 		t.Fatal("Run() error = nil, want non-nil")
 	}
 }
@@ -199,7 +204,7 @@ func TestRunPropagatesCustomUIConfig(t *testing.T) {
 		exitFn = origExit
 	}()
 
-	newServiceFn = func(api *info.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+	newServiceFn = func(api daemonInfo.JailState, cfg *config.Config, snapshots collector.Provider) serviceAPI {
 		return &stubService{}
 	}
 	newParserFn = func() parserAPI { return &stubParser{} }
@@ -217,7 +222,7 @@ func TestRunPropagatesCustomUIConfig(t *testing.T) {
 	exitFn = func(code int) {}
 
 	cfg := &config.Config{UI: config.UIConfig{TableWidth: 55, BorderColor: "240"}}
-	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), info.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err != nil {
+	if err := Run(func() {}, cfg, log.New(&bytes.Buffer{}, "", 0), daemonInfo.NewAPI(), nil, NewTable(cfg.UI), NewInfo()); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 }

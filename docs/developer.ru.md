@@ -16,23 +16,25 @@ English version: [developer.md](./developer.md)
 
 ## Архитектура Верхнего Уровня
 
-Во время работы приложение состоит из четырёх основных частей:
+Во время работы проект разделён на две точки входа и набор общих пакетов:
 
-1. `cmd/project`
-   Точка входа, загрузка конфига, настройка логгеров, создание collector-а, запуск демона и TUI.
-2. `internal/collector`
+1. `cmd/awesomerctl`
+   Точка входа клиента `awesomerctl`: загрузка конфига, настройка логгеров, создание collector-а и запуск TUI.
+2. `cmd/awesomerd`
+   Точка входа демона `awesomerd`: загрузка конфига, запуск демона, запуск IPC socket и graceful shutdown по сигналам.
+3. `internal/collector`
    Общий краткоживущий кэш snapshot-ов процессов и деревьев процессов.
-3. `internal/service` и `internal/service/tui`
-   Пользовательский список процессов, сортировка, действия над процессами и обработка событий Bubble Tea.
-4. `internal/daemon`
-   Фоновый цикл контроля ресурсов, который переносит нарушающие лимиты деревья процессов в `processJail`.
+4. `internal/service` и `internal/service/tui`
+   Пользовательский список процессов, сортировка, локальные действия над процессами и обработка событий Bubble Tea.
+5. `internal/daemon`
+   Фоновый цикл контроля ресурсов плюс Unix-socket IPC, через который клиент управляет демоном.
 
 Поддерживающие пакеты:
 
 - `internal/config`
   YAML-конфиг и значения по умолчанию.
 - `internal/daemon/info`
-  Общая in-memory структура состояния "этот PID уже в jail".
+  Абстракция jail-state, которая используется и in-process, и через IPC-клиент.
 - `pkg/parser`
   Низкоуровневое чтение процессов через `gopsutil`.
 - `pkg/mutation`
@@ -44,19 +46,29 @@ English version: [developer.md](./developer.md)
 
 ## Ответственность Пакетов
 
-### `cmd/project`
+### `cmd/awesomerctl`
 
 `main.go` намеренно содержит только orchestration-логику:
 
-- убедиться, что существует `config.yaml`;
+- убедиться, что конфиг существует в Linux search path;
 - загрузить конфиг;
-- создать общий `info.API`;
 - создать общий process collector;
+- подключиться к daemon socket, если он существует;
 - создать логгеры;
-- запустить демон, если он включён;
 - запустить TUI.
 
-Путь старта построен вокруг подменяемых function variables, например `loadConfigFn`, `newDaemonFn` и `runTUIFn`. За счёт этого `main()` можно тестировать без запуска реального демона и Bubble Tea программы.
+Путь старта построен вокруг подменяемых function variables, например `loadConfigFn`, `newRemoteStateFn` и `runTUIFn`. За счёт этого client entrypoint можно тестировать без запуска реального демона и Bubble Tea программы.
+
+### `cmd/awesomerd`
+
+`main.go` — отдельный launcher для демона:
+
+- убедиться, что root-конфиг существует;
+- отказаться от запуска без root;
+- загрузить конфиг и потребовать `daemon.run=true`;
+- создать `info.API`, collector, daemon logger и daemon instance;
+- поднять IPC socket `/run/awesomer.sock`;
+- крутить enforcement loop до `SIGINT` или `SIGTERM`.
 
 ### `internal/config`
 
@@ -64,7 +76,8 @@ English version: [developer.md](./developer.md)
 
 Что важно:
 
-- `ReadConfig()` читает `config.yaml` и накладывает его поверх defaults;
+- `ReadConfig()` читает YAML по вычисленному пути конфига и накладывает его поверх defaults;
+- `ResolveConfigPath()` зависит от привилегий: non-root использует `~/.config/awesomer/config.yaml`, root использует `/etc/awesomer/config.yaml`;
 - `DefaultConfig()` — единственное место, где задаются значения по умолчанию;
 - daemon- и UI-конфиг вложены, а не разнесены по плоскому пространству имён.
 
@@ -168,7 +181,7 @@ Parser отвечает за дорогой низкоуровневый сбо�
 - не пытаться повторно jail-ить процессы, уже находящиеся в jail;
 - переносить целое дерево процесса в `processJail` после достижения порога нарушений;
 - освобождать jailed-процессы при остановке;
-- перечитывать daemon config из `config.yaml` без рестарта приложения.
+- перечитывать daemon config по вычисленному Linux-пути без рестарта приложения.
 
 Демон не знает, как устроен backend `systemd`/`cgroup`. Это делегировано в `pkg/cgroups`.
 
@@ -193,20 +206,23 @@ Parser отвечает за дорогой низкоуровневый сбо�
 
 ### Старт
 
-Последовательность старта такая:
+Теперь есть два startup flow.
 
-1. `runApp()` убеждается, что существует `config.yaml`.
+Старт клиента:
+
+1. `awesomerctl` вычисляет Linux-путь конфига и убеждается, что файл там существует.
 2. Конфиг загружается через `internal/config`.
-3. Создаётся `info.API`.
-4. Создаётся общий `collector.Collector`.
-5. Создаются логгеры.
-6. Если включён `daemon.run`, стартует демон.
-7. Стартует TUI и получает тот же `info.API` и тот же collector.
+3. Создаётся локальный collector для snapshot-ов процессов.
+4. Если доступен `/run/awesomer.sock`, строится IPC-клиент для jail-state и daemon control.
+5. Стартует TUI и использует локальный process inspection плюс опциональное удалённое управление демоном.
 
-Таким образом демон и TUI разделяют:
+Старт демона:
 
-- источник process snapshot-ов;
-- состояние membership в jail.
+1. `awesomerd` вычисляет `/etc/awesomer/config.yaml` и убеждается, что файл существует.
+2. Он загружает конфиг и валидирует root-only запуск.
+3. Создаёт `info.API`, общий collector и daemon logger.
+4. Поднимает IPC socket server на `/run/awesomer.sock`.
+5. Крутит enforcement loop до получения сигнала остановки.
 
 ### Обновление Списка Процессов
 

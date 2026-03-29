@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	infoWidth   = 72
 	heightSpace = 2
 	spacing     = 1
 	minTableW   = 44
@@ -35,7 +34,7 @@ func minInt(a, b int) int {
 	return b
 }
 
-func (m *model) syncFocus() {
+func (m model) syncFocus() {
 	if m.focusTable {
 		m.table.Focus()
 		return
@@ -43,7 +42,7 @@ func (m *model) syncFocus() {
 	m.table.Blur()
 }
 
-func (m *model) syncLayout() {
+func (m model) syncLayout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
@@ -96,7 +95,7 @@ func resolvePanelWidths(totalWidth int, ui config.UIConfig) (int, int) {
 	}
 }
 
-func (m *model) setInfoContent(content string) {
+func (m model) setInfoContent(content string) {
 	m.info.SetContent(strings.TrimRight(content, "\n"))
 	m.info.GotoTop()
 }
@@ -120,7 +119,7 @@ func (m model) selectedPID() (int, error) {
 	return strconv.Atoi(row[0])
 }
 
-func (m *model) startInput(mode inputMode, pid int) {
+func (m model) startInput(mode inputMode, pid int) {
 	m.inputMode = mode
 	m.inputPID = pid
 	m.inputValue = ""
@@ -129,13 +128,13 @@ func (m *model) startInput(mode inputMode, pid int) {
 	m.renderInputPrompt("")
 }
 
-func (m *model) clearInput() {
+func (m model) clearInput() {
 	m.inputMode = inputModeNone
 	m.inputPID = 0
 	m.inputValue = ""
 }
 
-func (m *model) renderInputPrompt(message string) {
+func (m model) renderInputPrompt(message string) {
 	var b strings.Builder
 
 	switch m.inputMode {
@@ -191,7 +190,7 @@ func parseCPUCores(raw string) ([]int, error) {
 	return cores, nil
 }
 
-func (m *model) submitInput() tea.Cmd {
+func (m model) submitInput() tea.Cmd {
 	switch m.inputMode {
 	case inputModeAffinity:
 		return m.submitAffinityInput()
@@ -204,7 +203,7 @@ func (m *model) submitInput() tea.Cmd {
 
 // submitAffinityInput and submitNoFileInput keep the two interactive form flows
 // separate so validation, mutation, and success rendering stay readable.
-func (m *model) submitAffinityInput() tea.Cmd {
+func (m model) submitAffinityInput() tea.Cmd {
 	cores, err := parseCPUCores(m.inputValue)
 	if err != nil {
 		m.renderInputPrompt("Error: " + err.Error())
@@ -222,7 +221,7 @@ func (m *model) submitAffinityInput() tea.Cmd {
 	return m.refreshRowsCmd()
 }
 
-func (m *model) submitNoFileInput() tea.Cmd {
+func (m model) submitNoFileInput() tea.Cmd {
 	limit, err := strconv.ParseUint(strings.TrimSpace(m.inputValue), 10, 64)
 	if err != nil {
 		m.renderInputPrompt("Error: invalid limit value")
@@ -395,9 +394,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncFocus()
 			return m, nil
 		case "q", "ctrl+c":
-			m.Logger.Println("Initial graceful shutdown...")
+			m.Logger.Println("Shutting down monitor...")
 			m.DaemonCancel()
-			m.Logger.Println("Daemon is now stopped")
 			return m, tea.Quit
 		case "tab":
 			m.focusTable = !m.focusTable
@@ -514,18 +512,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.refreshRowsCmd()
 
 		// sort mode manipulation
-		case "n":
-			m.Service.SetSortProcMod("-n")
-		case "c":
-			m.Service.SetSortProcMod("-c")
-		case "m":
-			m.Service.SetSortProcMod("-m")
-		case "t":
-			m.Service.SetSortProcMod("-t")
-		case "u":
-			m.Service.SetSortProcMod("-u")
-		case "p":
-			m.Service.SetSortProcMod("-p")
+		case "n", "c", "m", "t", "u", "p":
+			mode := "-" + msg.String()
+			m.Service.SetSortProcMod(mode)
+			applySortHeaderTitles(&m.table, mode)
+			return m, m.refreshRowsCmd()
 		}
 	}
 

@@ -1,13 +1,13 @@
 tick: 1
 
 logger:
-  log_path: ./awesome.log
-  daemon_log_path: ./awesome.daemon.log
+  log_path: /var/log/awesomer/awesome.log
+  daemon_log_path: /var/log/awesomer/awesome.daemon.log
 
 daemon:
   run: true
   tick: 5
-  cpu_limit: 85
+  cpu_limit: 80
   ram_limit: 60
   cpu_quota: 20
   ram_quota: 8G

@@ -14,7 +14,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		Run:       false,
+		Run:       true,
 		Tick:      3,
 		CPULimit:  85,
 		RAMLimit:  60,

@@ -16,23 +16,25 @@ The codebase is organized around a few practical goals:
 
 ## High-Level Architecture
 
-At runtime the application has four main parts:
+At runtime the project is split into two entry points plus shared packages:
 
-1. `cmd/project`
-   Entry point, config loading, logger setup, collector creation, daemon startup, and TUI startup.
-2. `internal/collector`
+1. `cmd/awesomerctl`
+   `awesomerctl` client entry point, config loading, logger setup, collector creation, and TUI startup.
+2. `cmd/awesomerd`
+   `awesomerd` entry point, config loading, daemon startup, IPC socket startup, and signal-driven shutdown.
+3. `internal/collector`
    Shared short-lived cache for process snapshots and process trees.
-3. `internal/service` and `internal/service/tui`
-   User-facing process list, sorting, process actions, and Bubble Tea event handling.
-4. `internal/daemon`
-   Background resource-control loop that watches processes and moves violating trees into `processJail`.
+4. `internal/service` and `internal/service/tui`
+   User-facing process list, sorting, local process actions, and Bubble Tea event handling.
+5. `internal/daemon`
+   Background resource-control loop plus Unix-socket IPC that exposes daemon control to the client.
 
 Support packages:
 
 - `internal/config`
   YAML config model and defaults.
 - `internal/daemon/info`
-  Shared in-memory state for "this PID is already in jail".
+  Jail-state abstraction used both in-process and through the IPC client.
 - `pkg/parser`
   Raw process inspection through `gopsutil`.
 - `pkg/mutation`
@@ -44,19 +46,30 @@ Support packages:
 
 ## Package Responsibilities
 
-### `cmd/project`
+### `cmd/awesomerctl`
 
 `main.go` is intentionally small orchestration code:
 
 - ensure `config.yaml` exists;
+- ensure a config file exists in the Linux config search path;
 - load config;
-- build the shared `info.API`;
 - build the shared process collector;
+- connect to the daemon socket if it exists;
 - create loggers;
-- start the daemon if enabled;
 - run the TUI.
 
-The startup path is written around replaceable function variables such as `loadConfigFn`, `newDaemonFn`, and `runTUIFn`. This keeps `main()` testable without launching the real daemon or Bubble Tea program.
+The startup path is written around replaceable function variables such as `loadConfigFn`, `newRemoteStateFn`, and `runTUIFn`. This keeps the client entry point testable without launching the real Bubble Tea program or a real daemon.
+
+### `cmd/awesomerd`
+
+`main.go` is the dedicated daemon launcher:
+
+- ensure the root config path exists;
+- refuse to run without root privileges;
+- load config and require `daemon.run=true`;
+- create `info.API`, collector, daemon logger, and daemon instance;
+- expose daemon control over `/run/awesomer.sock`;
+- run until `SIGINT` or `SIGTERM`.
 
 ### `internal/config`
 
@@ -64,7 +77,8 @@ This package owns the application config schema and defaults.
 
 Important points:
 
-- `ReadConfig()` reads `config.yaml` and overlays it on top of defaults.
+- `ReadConfig()` reads YAML from a resolved config path and overlays it on top of defaults.
+- `ResolveConfigPath()` is privilege-aware: non-root uses `~/.config/awesomer/config.yaml`, root uses `/etc/awesomer/config.yaml`.
 - `DefaultConfig()` is the single place that defines default runtime values.
 - the daemon sub-config and UI sub-config are nested, not flattened.
 
@@ -168,7 +182,7 @@ Its responsibilities are:
 - avoid re-jailing processes already in jail;
 - move full process trees into `processJail` after the threshold is reached;
 - release jailed processes on shutdown;
-- reload daemon config from `config.yaml` without restarting the app.
+- reload daemon config from the resolved Linux config path without restarting the app.
 
 The daemon does not know how cgroup/systemd backend detection works. That is delegated to `pkg/cgroups`.
 
@@ -193,20 +207,23 @@ This is the package to change if resource backend behaviour needs to evolve.
 
 ### Startup
 
-The startup sequence is:
+There are now two startup flows.
 
-1. `runApp()` ensures `config.yaml` exists.
+Client startup:
+
+1. `awesomerctl` resolves the Linux config path and ensures a file exists there.
 2. Config is loaded through `internal/config`.
-3. `info.API` is created.
-4. Shared `collector.Collector` is created.
-5. Loggers are created.
-6. The daemon is started if `daemon.run` is enabled.
-7. The TUI starts and receives the same `info.API` and collector instance.
+3. It creates a local collector for process snapshots.
+4. If `/run/awesomer.sock` is available, it builds an IPC-backed jail state client.
+5. The TUI starts and uses local process inspection plus optional remote daemon control.
 
-The daemon and TUI therefore share:
+Daemon startup:
 
-- process snapshot source;
-- jail membership state.
+1. `awesomerd` resolves `/etc/awesomer/config.yaml` and ensures it exists.
+2. It loads config and validates root-only execution.
+3. It creates `info.API`, a shared collector, and the daemon logger.
+4. It starts the IPC socket server on `/run/awesomer.sock`.
+5. It runs the enforcement loop until it receives a shutdown signal.
 
 ### Process List Refresh
 

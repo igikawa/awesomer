@@ -1,5 +1,6 @@
 .idea
 awesome.log
 awesome.daemon.log
-/config.yaml
-awesomer
+/awesomerd
+/awesomerctl
+dist

@@ -3,7 +3,7 @@ package tui
 import (
 	"awesomeProject/internal/collector"
 	"awesomeProject/internal/config"
-	daemonAPI "awesomeProject/internal/daemon/info"
+	daemonInfo "awesomeProject/internal/daemon/info"
 	"awesomeProject/internal/service"
 	parserpkg "awesomeProject/pkg/parser"
 	"context"
@@ -19,6 +19,7 @@ import (
 
 const INFO = "Info\n\n" +
 	"↑↓ - select service\n\n" +
+	"p/n/c/m/t/u - sort by PID, name, CPU, memory, threads, user\n\n" +
 	"Enter - show service info\n\n" +
 	"h - show big service info\n\n" +
 	"A - set CPU affinity\n\n" +
@@ -76,6 +77,7 @@ type uiStyles struct {
 type serviceAPI interface {
 	GetProcesses() ([]table.Row, bool, error)
 	SetSortProcMod(string)
+	CurrentSortProcMod() string
 	GetTuiTree(int32, map[int32][]int32) (string, error)
 	StopProcess(int) error
 	ResumeProcess(int) error
@@ -97,7 +99,10 @@ type program interface {
 }
 
 var (
-	newServiceFn = func(api *daemonAPI.API, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+	newServiceFn = func(api daemonInfo.JailState, cfg *config.Config, snapshots collector.Provider) serviceAPI {
+		if controller, ok := api.(service.JailController); ok {
+			return service.NewWithController(api, &cfg.Daemon, snapshots, controller)
+		}
 		return service.New(api, &cfg.Daemon, snapshots)
 	}
 	newParserFn = func() parserAPI {
@@ -153,6 +158,7 @@ func NewTable(uiCfg ...config.UIConfig) table.Model {
 		Background(lipgloss.Color(ui.SelectionBackgroundColor)).
 		Bold(false)
 	t.SetStyles(s)
+	applySortHeaderTitles(&t, "-p")
 
 	return t
 }
@@ -172,7 +178,7 @@ func NewInfo() viewport.Model {
 	return m
 }
 
-func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api *daemonAPI.API, snapshots collector.Provider, t table.Model, i viewport.Model) error {
+func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api daemonInfo.JailState, snapshots collector.Provider, t table.Model, i viewport.Model) error {
 	ui := mergeUIConfig(cfg.UI)
 	m := model{
 		table:      t,
@@ -187,6 +193,7 @@ func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api
 		Logger:       l,
 		Parser:       newParserFn(),
 	}
+	applySortHeaderTitles(&m.table, m.Service.CurrentSortProcMod())
 
 	app := newProgramFn(m)
 	if _, err := app.Run(); err != nil {
@@ -195,6 +202,62 @@ func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api
 	}
 
 	return nil
+}
+
+var activeHeaderTitleStyle = lipgloss.NewStyle().Bold(true)
+
+func applySortHeaderTitles(t *table.Model, sortMode string) {
+	columns := t.Columns()
+	for i := range columns {
+		columns[i].Title = headerTitleForColumn(sortMode, i)
+	}
+	t.SetColumns(columns)
+}
+
+func headerTitleForColumn(sortMode string, index int) string {
+	title := plainHeaderTitle(index)
+	if sortMode == sortModeForColumn(index) && title != "" {
+		return activeHeaderTitleStyle.Render(title)
+	}
+	return title
+}
+
+func plainHeaderTitle(index int) string {
+	switch index {
+	case 0:
+		return "PID"
+	case 1:
+		return "Name"
+	case 2:
+		return "CPU"
+	case 3:
+		return "Mem"
+	case 4:
+		return "Threads"
+	case 5:
+		return "User"
+	default:
+		return ""
+	}
+}
+
+func sortModeForColumn(index int) string {
+	switch index {
+	case 0:
+		return "-p"
+	case 1:
+		return "-n"
+	case 2:
+		return "-c"
+	case 3:
+		return "-m"
+	case 4:
+		return "-t"
+	case 5:
+		return "-u"
+	default:
+		return ""
+	}
 }
 
 func mergeUIConfig(ui config.UIConfig) config.UIConfig {

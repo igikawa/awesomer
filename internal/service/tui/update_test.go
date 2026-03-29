@@ -206,6 +206,23 @@ func TestInfoHeaderAndFooterViews(t *testing.T) {
 	}
 }
 
+func TestApplySortHeaderTitlesMarksActiveColumn(t *testing.T) {
+	tbl := NewTable()
+
+	applySortHeaderTitles(&tbl, "-c")
+
+	columns := tbl.Columns()
+	if !strings.Contains(columns[2].Title, "CPU") {
+		t.Fatalf("CPU column title = %q, want CPU fragment", columns[2].Title)
+	}
+	if columns[2].Title == "CPU" {
+		t.Fatalf("CPU column title = %q, want styled active header", columns[2].Title)
+	}
+	if columns[0].Title != "PID" {
+		t.Fatalf("PID column title = %q, want plain PID", columns[0].Title)
+	}
+}
+
 func TestMergeUIConfigFillsDefaults(t *testing.T) {
 	ui := mergeUIConfig(config.UIConfig{TableWidth: 45})
 	defaults := config.DefaultUIConfig()
