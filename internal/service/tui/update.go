@@ -34,7 +34,7 @@ func minInt(a, b int) int {
 	return b
 }
 
-func (m model) syncFocus() {
+func (m *model) syncFocus() {
 	if m.focusTable {
 		m.table.Focus()
 		return
@@ -42,7 +42,7 @@ func (m model) syncFocus() {
 	m.table.Blur()
 }
 
-func (m model) syncLayout() {
+func (m *model) syncLayout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
@@ -95,12 +95,12 @@ func resolvePanelWidths(totalWidth int, ui config.UIConfig) (int, int) {
 	}
 }
 
-func (m model) setInfoContent(content string) {
+func (m *model) setInfoContent(content string) {
 	m.info.SetContent(strings.TrimRight(content, "\n"))
 	m.info.GotoTop()
 }
 
-func (m model) refreshRowsCmd() tea.Cmd {
+func (m *model) refreshRowsCmd() tea.Cmd {
 	return func() tea.Msg {
 		rows, changed, err := m.Service.GetProcesses()
 		if err != nil {
@@ -111,7 +111,7 @@ func (m model) refreshRowsCmd() tea.Cmd {
 	}
 }
 
-func (m model) selectedPID() (int, error) {
+func (m *model) selectedPID() (int, error) {
 	row := m.table.SelectedRow()
 	if len(row) == 0 {
 		return 0, fmt.Errorf("no service selected")
@@ -119,7 +119,7 @@ func (m model) selectedPID() (int, error) {
 	return strconv.Atoi(row[0])
 }
 
-func (m model) startInput(mode inputMode, pid int) {
+func (m *model) startInput(mode inputMode, pid int) {
 	m.inputMode = mode
 	m.inputPID = pid
 	m.inputValue = ""
@@ -128,13 +128,13 @@ func (m model) startInput(mode inputMode, pid int) {
 	m.renderInputPrompt("")
 }
 
-func (m model) clearInput() {
+func (m *model) clearInput() {
 	m.inputMode = inputModeNone
 	m.inputPID = 0
 	m.inputValue = ""
 }
 
-func (m model) renderInputPrompt(message string) {
+func (m *model) renderInputPrompt(message string) {
 	var b strings.Builder
 
 	switch m.inputMode {
@@ -190,7 +190,7 @@ func parseCPUCores(raw string) ([]int, error) {
 	return cores, nil
 }
 
-func (m model) submitInput() tea.Cmd {
+func (m *model) submitInput() tea.Cmd {
 	switch m.inputMode {
 	case inputModeAffinity:
 		return m.submitAffinityInput()
@@ -203,7 +203,7 @@ func (m model) submitInput() tea.Cmd {
 
 // submitAffinityInput and submitNoFileInput keep the two interactive form flows
 // separate so validation, mutation, and success rendering stay readable.
-func (m model) submitAffinityInput() tea.Cmd {
+func (m *model) submitAffinityInput() tea.Cmd {
 	cores, err := parseCPUCores(m.inputValue)
 	if err != nil {
 		m.renderInputPrompt("Error: " + err.Error())
@@ -221,7 +221,7 @@ func (m model) submitAffinityInput() tea.Cmd {
 	return m.refreshRowsCmd()
 }
 
-func (m model) submitNoFileInput() tea.Cmd {
+func (m *model) submitNoFileInput() tea.Cmd {
 	limit, err := strconv.ParseUint(strings.TrimSpace(m.inputValue), 10, 64)
 	if err != nil {
 		m.renderInputPrompt("Error: invalid limit value")
@@ -250,7 +250,7 @@ func intsToCSV(values []int) string {
 	return strings.Join(parts, ",")
 }
 
-func (m model) formatedInfo(pid int32) string {
+func (m *model) formatedInfo(pid int32) string {
 	proc, err := m.Parser.ProcessInfo(pid)
 	if err != nil {
 		return fmt.Sprintf("Error parsing service info: %s", err)
@@ -269,7 +269,7 @@ func (m model) formatedInfo(pid int32) string {
 	return b.String()
 }
 
-func (m model) formatedBigInfo(pid int32) string {
+func (m *model) formatedBigInfo(pid int32) string {
 	proc, err := m.Parser.HardObjectParse(pid)
 	if err != nil {
 		return fmt.Sprintf("Error parsing service info: %s", err)
@@ -324,7 +324,7 @@ func (m model) formatedBigInfo(pid int32) string {
 	return b.String()
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {

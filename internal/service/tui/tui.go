@@ -108,13 +108,13 @@ var (
 	newParserFn = func() parserAPI {
 		return parserpkg.NewParser()
 	}
-	newProgramFn = func(m model) program {
+	newProgramFn = func(m *model) program {
 		return tea.NewProgram(m)
 	}
 	exitFn = os.Exit
 )
 
-func (m model) tick() tea.Cmd {
+func (m *model) tick() tea.Cmd {
 	if m.Tick <= 0 {
 		return nil
 	}
@@ -195,7 +195,7 @@ func Run(daemonCancel context.CancelFunc, cfg *config.Config, l *log.Logger, api
 	}
 	applySortHeaderTitles(&m.table, m.Service.CurrentSortProcMod())
 
-	app := newProgramFn(m)
+	app := newProgramFn(&m)
 	if _, err := app.Run(); err != nil {
 		defer exitFn(1)
 		return err

@@ -145,7 +145,7 @@ func TestRunUsesInjectedProgram(t *testing.T) {
 	}
 	newParserFn = func() parserAPI { return &stubParser{} }
 	called := false
-	newProgramFn = func(m model) program {
+	newProgramFn = func(m *model) program {
 		return stubProgram{run: func() (tea.Model, error) {
 			called = true
 			if m.UI.InfoWidth != config.DefaultUIConfig().InfoWidth {
@@ -181,7 +181,7 @@ func TestRunReturnsProgramError(t *testing.T) {
 		return &stubService{}
 	}
 	newParserFn = func() parserAPI { return &stubParser{} }
-	newProgramFn = func(m model) program {
+	newProgramFn = func(m *model) program {
 		return stubProgram{run: func() (tea.Model, error) { return m, errors.New("boom") }}
 	}
 	exitFn = func(code int) {}
@@ -208,7 +208,7 @@ func TestRunPropagatesCustomUIConfig(t *testing.T) {
 		return &stubService{}
 	}
 	newParserFn = func() parserAPI { return &stubParser{} }
-	newProgramFn = func(m model) program {
+	newProgramFn = func(m *model) program {
 		return stubProgram{run: func() (tea.Model, error) {
 			if m.UI.TableWidth != 55 {
 				t.Fatalf("UI.TableWidth = %d, want 55", m.UI.TableWidth)
@@ -316,7 +316,7 @@ func TestUpdateHandlesTickAndSorting(t *testing.T) {
 		t.Fatal("tick batch returned nil")
 	}
 
-	m2 := updated.(model)
+	m2 := updated.(*model)
 	updated, _ = m2.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if len(svc.sortModes) == 0 || svc.sortModes[0] != "-n" {
 		t.Fatalf("sort modes = %v", svc.sortModes)
@@ -339,11 +339,11 @@ func TestUpdateHandlesToggleJailAndQuit(t *testing.T) {
 	if svc.togglePID != 123 {
 		t.Fatalf("toggle pid = %d, want 123", svc.togglePID)
 	}
-	if !strings.Contains(updated.(model).info.View(), "Moved process tree into processJail") {
-		t.Fatalf("info view = %q", updated.(model).info.View())
+	if !strings.Contains(updated.(*model).info.View(), "Moved process tree into processJail") {
+		t.Fatalf("info view = %q", updated.(*model).info.View())
 	}
 
-	_, cmd = updated.(model).Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd = updated.(*model).Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if cmd == nil {
 		t.Fatal("Update(q) cmd = nil")
 	}
@@ -368,10 +368,10 @@ func TestUpdateSkipsTableRefreshWhenRowsUnchanged(t *testing.T) {
 		t.Fatal("tick batch returned nil")
 	}
 
-	m2 := updated.(model)
+	m2 := updated.(*model)
 	before := m2.table.Rows()
 	updated, _ = m2.Update(msg)
-	after := updated.(model).table.Rows()
+	after := updated.(*model).table.Rows()
 	if len(before) != len(after) {
 		t.Fatalf("row count changed from %d to %d", len(before), len(after))
 	}
@@ -386,5 +386,35 @@ func TestViewRendersPanels(t *testing.T) {
 	}
 	if !strings.Contains(view.Content, "PID") || !strings.Contains(view.Content, "Details") {
 		t.Fatalf("View().Content = %q", view.Content)
+	}
+}
+
+func TestViewRendersPanelsWithoutWindowSize(t *testing.T) {
+	m := newStubModel()
+	m.width = 0
+	m.height = 0
+	m.tableWidth = 0
+	m.infoWidth = 0
+	m.panelH = 0
+	m.infoBodyH = 0
+
+	view := m.View()
+	if !strings.Contains(view.Content, "PID") || !strings.Contains(view.Content, "Details") {
+		t.Fatalf("View().Content = %q", view.Content)
+	}
+}
+
+func TestViewRepairsCollapsedLayout(t *testing.T) {
+	m := newStubModel()
+	m.width = 140
+	m.height = 4
+	m.syncLayout()
+
+	view := m.View()
+	if !strings.Contains(view.Content, "PID") || !strings.Contains(view.Content, "Details") {
+		t.Fatalf("View().Content = %q", view.Content)
+	}
+	if !strings.Contains(view.Content, "Info") {
+		t.Fatalf("View().Content = %q, want visible info body", view.Content)
 	}
 }

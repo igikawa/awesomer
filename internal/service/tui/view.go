@@ -14,7 +14,34 @@ var panelTitleStyle = lipgloss.NewStyle().
 var panelMetaStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("244"))
 
-func (m model) infoHeaderView(width int) string {
+func (m *model) ensureRenderableLayout() {
+	const defaultHeight = 24
+	minWidth := minTableW + minInfoW + spacing
+	minPanelHeight := infoHeaderH + infoFooterH + 3
+
+	needsRelayout := m.tableWidth <= 0 || m.infoWidth <= 0 || m.panelH < minPanelHeight
+	if len(m.table.Rows()) > 0 && m.table.Height() == 0 {
+		needsRelayout = true
+	}
+	if m.info.TotalLineCount() > 0 && m.info.VisibleLineCount() == 0 {
+		needsRelayout = true
+	}
+
+	if m.width < minWidth {
+		m.width = maxInt(m.UI.TableWidth+m.UI.InfoWidth+spacing, minWidth)
+		needsRelayout = true
+	}
+	if m.height < minPanelHeight+heightSpace {
+		m.height = defaultHeight
+		needsRelayout = true
+	}
+
+	if needsRelayout {
+		m.syncLayout()
+	}
+}
+
+func (m *model) infoHeaderView(width int) string {
 	title := "Details"
 	if m.inputMode != inputModeNone {
 		title = "Details [input]"
@@ -24,7 +51,7 @@ func (m model) infoHeaderView(width int) string {
 	return panelTitleStyle.Width(width).Render(title)
 }
 
-func (m model) infoFooterView(width int) string {
+func (m *model) infoFooterView(width int) string {
 	total := m.info.TotalLineCount()
 	if total == 0 {
 		return panelMetaStyle.Width(width).Render("Enter details | h full | A affinity | L limits | J jail")
@@ -51,7 +78,9 @@ func (m model) infoFooterView(width int) string {
 	return lipgloss.NewStyle().Width(width).Render(footer)
 }
 
-func (m model) View() tea.View {
+func (m *model) View() tea.View {
+	m.ensureRenderableLayout()
+
 	tStyle := m.styles.idlePanel
 	iStyle := m.styles.idlePanel
 	if m.focusTable {
