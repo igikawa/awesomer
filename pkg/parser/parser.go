@@ -193,7 +193,13 @@ func (p *Parser) HardObjectParse(pid int32) (Info, error) {
 		)
 	}
 
+	affinity, _ := mutation.GetCPUaffinity(int(pid))
+	noFileSoft, noFileHard, _ := mutation.GetPRlimit(int(pid), unix.RLIMIT_NOFILE)
+
 	return Info{
+		CPUAffinity: affinity,
+		NoFileSoft:  noFileSoft,
+		NoFileHard:  noFileHard,
 		Connections: formatedConnections,
 		OpenFiles:   formatedOpenFiles,
 		Children:    formattedChildren,
